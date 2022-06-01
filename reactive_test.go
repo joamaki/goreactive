@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
 	"testing"
 	"time"
@@ -490,6 +491,131 @@ func TestRetry(t *testing.T) {
 
 	if err := <-errs; err != err2 {
 		t.Fatalf("expected error %s, got %s", err2, err)
+	}
+}
+
+func TestSplitHead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	headSrc, tailSrc := SplitHead(Range(0, 5))
+
+	// Need to consume tail first as head blocks
+	// until it is instantiated.
+	tailItems, err := ToSlice(ctx, tailSrc)
+	assertNil(t, "ToSlice(tail)", err)
+	assertSlice(t, "tail", []int{1,2,3,4}, tailItems)
+
+	headItems, err := ToSlice(ctx, headSrc)
+	assertNil(t, "ToSlice(head)", err)
+	assertSlice(t, "head", []int{0}, headItems)
+}
+
+//
+// Benchmarks
+//
+
+func BenchmarkFromSlice(b *testing.B) {
+	ctx := context.Background()
+	s := make([]int, b.N, b.N)
+	b.ResetTimer()
+
+	err := Discard(ctx, FromSlice(s))
+	if err != nil {
+		b.Fatal(err)
+	}
+}
+
+func BenchmarkMerge(b *testing.B) {
+	ctx := context.Background()
+	s := make([]int, b.N, b.N)
+	b.ResetTimer()
+
+	count := 0
+	err := Merge(FromSlice(s)).Observe(
+		ctx,
+                func(item int) error {
+                        count++
+                        return nil
+                })
+
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	if count != b.N {
+		b.Fatalf("expected %d items, got %d", b.N, count)
+	}
+}
+
+func BenchmarkBroadcast(b *testing.B) {
+	ctx := context.Background()
+	s := make([]int, b.N, b.N)
+	b.ResetTimer()
+
+	count := 0
+	err := Broadcast(ctx, 16, FromSlice(s)).Observe(
+		ctx,
+                func(item int) error {
+                        count++
+                        return nil
+                })
+
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	if count != b.N {
+		b.Fatalf("expected %d items, got %d", b.N, count)
+	}
+}
+
+func BenchmarkMap(b *testing.B) {
+	ctx := context.Background()
+	s := make([]int, b.N, b.N)
+	b.ResetTimer()
+
+	count := 0
+	err :=
+	  Map(FromSlice(s), func(x int) int { return x*2 }).
+	    Observe(
+	      ctx,
+              func(item int) error {
+	              count++
+	              return nil
+              })
+
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	if count != b.N {
+		b.Fatalf("expected %d items, got %d", b.N, count)
+	}
+}
+
+func BenchmarkParallelMap(b *testing.B) {
+	ctx := context.Background()
+	s := make([]int, b.N, b.N)
+	b.ResetTimer()
+
+	count := 0
+	err :=
+	  ParallelMap(FromSlice(s), runtime.NumCPU(),
+	              func(x int) int { return x*2 }).
+	    Observe(
+	      ctx,
+              func(item int) error {
+	              count++
+	              return nil
+              })
+
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	if count != b.N {
+		b.Fatalf("expected %d items, got %d", b.N, count)
 	}
 }
 

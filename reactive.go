@@ -536,12 +536,13 @@ func Merge[T any](srcs...Observable[T]) Observable[T] {
 			// Observe().
 			for _, src := range srcs {
 				go func(src Observable[T]) {
-					nextErrs := make(chan error)
-					errs <- src.Observe(mergeCtx,
-					                    func(item T) error {
-						                    reqs <- mergeNext[T]{item, nextErrs}
-						                    return <-nextErrs
-					                    })
+					nextErrs := make(chan error, 1)
+					errs <- src.Observe(
+						    mergeCtx,
+				                    func(item T) error {
+						    	reqs <- mergeNext[T]{item, nextErrs}
+						        return <-nextErrs
+				                    })
 					wg.Done()
 				}(src)
 			}
@@ -639,12 +640,6 @@ func Retry[T any](src Observable[T], shouldRetry func(err error) bool) Observabl
 		})
 }
 
-func Foreach[T any](ctx context.Context, src Observable[T], fn func(T) error) error {
-	return src.Observe(
-		ctx,
-		fn)
-}
-
 // Range creates an observable that emits integers in range from...to-1.
 func Range(from, to int) Observable[int] {
 	return FuncObservable[int](
@@ -687,4 +682,39 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 			}
 			return err
 		})
+}
+
+
+// SplitHead splits the source 'src' into two: 'head' which receives the first item,
+// and 'tail' that receives the rest. Errors from source are only handed to 'tail'.
+func SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T]) {
+	headChan := make(chan T, 1)
+	head = FromChannel(headChan)
+	tail = FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			first := true
+			err := src.Observe(
+				ctx,
+				func(item T) error {
+				    if first {
+					    headChan <- item
+					    close(headChan)
+					    first = false
+					    return nil
+				    }
+				    return next(item)
+				})
+			if first {
+				// First element never arrived.
+				close(headChan)
+			}
+			return err
+
+		})
+	return
+}
+
+// Discard discards all items from 'src' and returns an error if any.
+func Discard[T any](ctx context.Context, src Observable[T]) error {
+	return src.Observe(ctx, func(item T) error { return nil })
 }
