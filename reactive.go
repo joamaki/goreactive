@@ -4,7 +4,6 @@
 package goreactive
 
 import (
-	"container/list"
 	"context"
 	"errors"
 	"sync"
@@ -13,19 +12,20 @@ import (
 
 type Observable[T any] interface {
 	// Observe starts observing a stream of T's.
-	// 'next' is called on each element. If it returns an error the stream closes
+	// 'next' is called on each element sequentially. If it returns an error the stream closes
 	// and this error is returned by Observe().
 	// When 'ctx' is cancelled the stream closes and ctx.Err() is returned.
 	//
 	// Implementations of Observe() must maintain the following invariants:
-	// - Observe blocks until the stream closes
-	// - 'next' is called sequentially from the goroutine that called Observe()
-	// - if 'next' returns an error it must not be called again and the same error
+	// - Observe blocks until the stream and any upstreams are closed. 
+	// - 'next' is called sequentially from the goroutine that called Observe() in
+	//   order to maintain good stack traces and not require observer to be thread-safe.
+	// - if 'next' returns an error it must not be called again and the same error 
 	//   must be returned by Observe().
 	//
 	// Handling of context cancellation is asynchronous and implementation may
 	// choose to block on 'next' and only handle cancellation after 'next' returns.
-	// If 'next' implements a long-running operation then it is expected that the caller
+	// If 'next' implements a long-running operation, then it is expected that the caller
 	// will handle 'ctx' cancellation in the 'next' function itself.
 	Observe(ctx context.Context, next func(T) error) error
 }
@@ -70,6 +70,12 @@ func Empty[T any]() Observable[T] {
 	return Error[T](nil)
 }
 
+// Discard discards all items from 'src' and returns an error if any.
+func Discard[T any](ctx context.Context, src Observable[T]) error {
+	return src.Observe(ctx, func(item T) error { return nil })
+}
+
+// First returns the first item from 'src' observable and then closes it.
 func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
 	subCtx, cancel := context.WithCancel(ctx)
 	err = src.Observe(subCtx,
@@ -81,6 +87,7 @@ func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
 	return
 }
 
+// FromSlice converts a slice into an Observable.
 func FromSlice[T any](items []T) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
@@ -99,6 +106,7 @@ func FromSlice[T any](items []T) Observable[T] {
 		})
 }
 
+// ToSlice converts an Observable into a slice.
 func ToSlice[T any](ctx context.Context, src Observable[T]) (items []T, err error) {
 	items = make([]T, 0)
 	err = src.Observe(
@@ -133,6 +141,9 @@ func FromChannel[T any](in <-chan T) Observable[T] {
 		})
 }
 
+// ToChannels converts an observable into an item channel and error channel.
+// When the source closes both channels are closed and an error (which may be nil)
+// is always sent to the error channel.
 func ToChannels[T any](ctx context.Context, src Observable[T]) (<-chan T, <-chan error) {
 	out := make(chan T, 1)
 	errs := make(chan error, 1)
@@ -159,7 +170,8 @@ func Map[A, B any](src Observable[A], apply func(A) B) Observable[B] {
 		})
 }
 
-
+// FlatMap applies a function that returns an observable of Bs to the source observable of As.
+// The observable from the function is flattened (hence FlatMap).
 func FlatMap[A, B any](src Observable[A], apply func(A) Observable[B]) Observable[B] {
 	return FuncObservable[B](
 		func(ctx context.Context, next func(B) error) error {
@@ -174,8 +186,13 @@ func FlatMap[A, B any](src Observable[A], apply func(A) Observable[B]) Observabl
 		})
 }
 
+// Flatten takes an observable of slices of T and returns an observable of T.
 func Flatten[T any](src Observable[[]T]) Observable[T] {
-	return FlatMap(src, func(items []T) Observable[T] { return FromSlice(items) })
+	return FlatMap(
+		src,
+		func(items []T) Observable[T] {
+			return FromSlice(items)
+		})
 }
 
 // ParallelMap maps a function in parallel to the source. The errors from downstream
@@ -403,7 +420,6 @@ func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Obser
 		})
 }
 
-
 // CoalesceByKey buffers updates from the input observable and keeps only the latest version of the
 // value for the same key when the observer is slow in consuming the values.
 func CoalesceByKey[K comparable, V any](src Observable[V], toKey func(V) K, bufferSize int) Observable[V] {
@@ -415,13 +431,13 @@ func CoalesceByKey[K comparable, V any](src Observable[V], toKey func(V) K, buff
 				errs <- src.Observe(
 					ctx,
 					func(value V) error {
-						queue.push(toKey(value), value)
+						queue.Push(toKey(value), value)
 						return nil
 					})
-				queue.close()
+				queue.Close()
 			}()
 			for {
-				if v, ok := queue.pop(); ok {
+				if _, v, ok := queue.Pop(); ok {
 					next(v)
 				} else {
 					return <-errs
@@ -430,81 +446,6 @@ func CoalesceByKey[K comparable, V any](src Observable[V], toKey func(V) K, buff
 		})
 }
 
-type coalescingQueue[K comparable, V any] struct {
-	sync.Mutex
-
-	// fullCond is used to wait for slots to free up when pushing items
-	fullCond *sync.Cond
-
-	// nonEmptyCond is used to wait for items when popping
-	nonEmptyCond *sync.Cond
-
-	bufSize int
-	values map[K]V
-	queue *list.List
-	closed bool
-}
-
-func newCoalescingQueue[K comparable, V any](bufSize int) *coalescingQueue[K, V] {
-	q := &coalescingQueue[K,V]{
-		bufSize: bufSize,
-		values: make(map[K]V),
-		queue: list.New(),
-	}
-	q.fullCond = sync.NewCond(q)
-	q.nonEmptyCond = sync.NewCond(q)
-	return q
-}
-
-func (q *coalescingQueue[K, V]) close() {
-	q.Lock()
-	q.closed = true
-	q.nonEmptyCond.Signal()
-	q.Unlock()
-}
-
-func (q *coalescingQueue[K, V]) push(k K, v V) {
-	q.Lock()
-	defer q.Unlock()
-
-	if q.closed {
-		return
-	}
-
-	for len(q.values) >= q.bufSize {
-		q.fullCond.Wait()
-	}
-
-	if _, ok := q.values[k]; !ok {
-		q.queue.PushBack(k)
-	}
-	q.values[k] = v
-
-	q.nonEmptyCond.Signal()
-}
-
-func (q *coalescingQueue[K, V]) pop() (V, bool) {
-	q.Lock()
-	defer q.Unlock()
-
-	// If the queue is empty, wait until an item is pushed.
-	for !q.closed && q.queue.Front() == nil {
-		q.nonEmptyCond.Wait()
-	}
-
-	if q.closed {
-		var empty V
-		return empty, false
-	}
-
-	key := q.queue.Remove(q.queue.Front()).(K)
-	value := q.values[key]
-	delete(q.values, key)
-
-	q.fullCond.Signal()
-
-	return value, true
-}
 
 type mergeNext[T any] struct {
 	item T
@@ -712,9 +653,4 @@ func SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T]
 
 		})
 	return
-}
-
-// Discard discards all items from 'src' and returns an error if any.
-func Discard[T any](ctx context.Context, src Observable[T]) error {
-	return src.Observe(ctx, func(item T) error { return nil })
 }
