@@ -13,6 +13,7 @@ import (
 //
 
 func assertSlice[T comparable](t *testing.T, what string, expected []T, actual []T) {
+	t.Helper()
 	if len(expected) != len(actual) {
 		t.Fatalf("assertSlice[%s]: expected %d items, got %d", what, len(expected), len(actual))
 	}
@@ -24,6 +25,7 @@ func assertSlice[T comparable](t *testing.T, what string, expected []T, actual [
 }
 
 func assertNil(t *testing.T, what string, err error) {
+	t.Helper()
 	if err != nil {
 		t.Fatalf("unexpected error in %s: %s", what, err)
 	}

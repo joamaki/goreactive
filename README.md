@@ -149,6 +149,9 @@ Retry(src, func(err error) bool { return true }) // always retry if 'src' comple
 // Take[T any](n int, src Observable[T]) Observable[T]
 Take(10, src)              // take 10 items from 'src' and then complete it.
 
+// Buffer[T any](src Observable[T], bufSize int, strategy BackpressureStrategy) Observable[T]
+Buffer(src, 16, BackpressureDrop) // buffer up to 16 items from 'src' and drop items if buffer is full
+
 // SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T])
 SplitHead(Range(0,10)) => (Single(0), Range(1,10))
 ```

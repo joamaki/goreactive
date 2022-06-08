@@ -6,8 +6,11 @@ package stream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // Map applies a function onto an observable.
@@ -385,6 +388,92 @@ func Delay[T any](src Observable[T], interval time.Duration) Observable[T] {
 					return next(item)
 				})
 		})
+}
+
+// Throttle limits the rate at which items are emitted.
+func Throttle[T any](src Observable[T], ratePerSecond float64, burst int) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			limiter := rate.NewLimiter(rate.Limit(ratePerSecond), burst)
+			return src.Observe(
+				ctx,
+				func(item T) error {
+					if err := limiter.Wait(ctx); err != nil {
+						return err
+					}
+					return next(item)
+				})
+		})
+}
+
+const (
+	// Items are dropped if buffer is full
+	BackpressureDrop = iota
+
+	// Observing blocks until there is room in the buffer
+	BackpressureBlock
+)
+
+type BackpressureStrategy int
+
+// Buffer buffers 'n' items with configurable backpressure strategy.
+// Downstream errors are not propagated towards 'src'.
+func Buffer[T any](src Observable[T], bufSize int, strategy BackpressureStrategy) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			bufCtx, cancel := context.WithCancel(ctx)
+			defer cancel()
+
+			buf := make(chan T, bufSize)
+			var send func(T) error
+			if strategy == BackpressureBlock {
+				send = func(item T) error {
+					buf <- item
+					return nil
+				}
+			} else if strategy == BackpressureDrop {
+				send = func(item T) error {
+					select {
+					case buf <- item:
+					default:
+					}
+					return nil
+				}
+			} else {
+				panic(fmt.Sprintf("unknown strategy: %d", strategy))
+			}
+
+			errs := make(chan error, 1)
+
+			// Fork a goroutine to push items to the buffer
+			go func() {
+				errs <- src.Observe(bufCtx, send)
+				close(errs)
+				close(buf)
+			}()
+
+			// Send items downstream from the buffer.
+			var nextErr error
+			for item := range buf {
+				nextErr = next(item)
+				if nextErr != nil {
+					cancel()
+					break
+				}
+			}
+
+			// Wait for observing to stop.
+			observeErr := <-errs
+
+			if nextErr != nil {
+				return nextErr
+			}
+			if observeErr != nil {
+				return observeErr
+			}
+			return ctx.Err()
+		})
+
 }
 
 // OnNext calls the supplied function on each emitted item.

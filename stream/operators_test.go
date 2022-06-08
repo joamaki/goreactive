@@ -362,6 +362,58 @@ func TestSplitHead(t *testing.T) {
 	assertSlice(t, "head", []int{0}, headItems)
 }
 
+func TestBuffer(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	takeSlowly := func(src Observable[int]) []int {
+		items := []int{}
+		err := Take(5, src).Observe(ctx,
+			func(item int) error {
+				time.Sleep(5 * time.Millisecond)
+				items = append(items, item)
+				return nil
+			})
+		if err != nil {
+			t.Fatalf("unexpected error: %s", err)
+		}
+		return items
+	}
+
+	// Test with empty source
+	ticksSlice := takeSlowly(Buffer(Empty[int](), 10, BackpressureBlock))
+	assertSlice(t, "empty block", []int{}, ticksSlice)
+	ticksSlice = takeSlowly(Buffer(Empty[int](), 10, BackpressureDrop))
+	assertSlice(t, "empty drop", []int{}, ticksSlice)
+
+	// Test with one item source
+	ticksSlice = takeSlowly(Buffer(Single(1), 10, BackpressureBlock))
+	assertSlice(t, "single block", []int{1}, ticksSlice)
+	ticksSlice = takeSlowly(Buffer(Single(1), 10, BackpressureDrop))
+	assertSlice(t, "single drop", []int{1}, ticksSlice)
+
+	// Test blocking strategy
+	ticks := Interval(time.Millisecond)
+	ticks = Buffer(ticks, 10, BackpressureBlock)
+	ticksSlice = takeSlowly(ticks)
+	assertSlice(t, "interval block", []int{0, 1, 2, 3, 4}, ticksSlice)
+
+	// Test dropping strategy
+	ticks = Interval(time.Millisecond)
+	ticks = Buffer(ticks, 1, BackpressureDrop)
+	ticksSlice = takeSlowly(ticks)
+
+	cumulativeDiff := 0
+	prevItem := ticksSlice[0]
+	for _, item := range ticksSlice[1:] {
+		cumulativeDiff += item - prevItem
+		prevItem = item
+	}
+	if cumulativeDiff <= len(ticksSlice) {
+		t.Fatalf("interval drop: Items not dropped, cumulative diff %d, items: %v", cumulativeDiff, ticksSlice)
+	}
+}
+
 //
 // Benchmarks
 //
