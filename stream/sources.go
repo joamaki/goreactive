@@ -44,11 +44,6 @@ func Empty[T any]() Observable[T] {
 	return Error[T](nil)
 }
 
-// Discard discards all items from 'src' and returns an error if any.
-func Discard[T any](ctx context.Context, src Observable[T]) error {
-	return src.Observe(ctx, func(item T) error { return nil })
-}
-
 // FromSlice converts a slice into an Observable.
 func FromSlice[T any](items []T) Observable[T] {
 	return FuncObservable[T](

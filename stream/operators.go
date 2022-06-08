@@ -10,18 +10,6 @@ import (
 	"time"
 )
 
-// First returns the first item from 'src' observable and then closes it.
-func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
-	subCtx, cancel := context.WithCancel(ctx)
-	err = src.Observe(subCtx,
-		func(x T) error {
-			item = x
-			cancel()
-			return nil
-		})
-	return
-}
-
 // Map applies a function onto an observable.
 func Map[A, B any](src Observable[A], apply func(A) B) Observable[B] {
 	return FuncObservable[B](
@@ -316,6 +304,10 @@ type mergeNext[T any] struct {
 
 // Merge multiple observables into one. Error from one of the sources cancels
 // context and completes the stream.
+//
+// Beware: the observables are observed from goroutines spawned by Merge()
+// and thus run concurrently (e.g. functions Map()'d on the input sources need to
+// be thread-safe).
 func Merge[T any](srcs ...Observable[T]) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {

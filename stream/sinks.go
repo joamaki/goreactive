@@ -11,6 +11,18 @@ import (
 // Sinks: operators that run an observable and send the output somewhere.
 //
 
+// First returns the first item from 'src' observable and then closes it.
+func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
+	subCtx, cancel := context.WithCancel(ctx)
+	err = src.Observe(subCtx,
+		func(x T) error {
+			item = x
+			cancel()
+			return nil
+		})
+	return
+}
+
 // ToSlice converts an Observable into a slice.
 func ToSlice[T any](ctx context.Context, src Observable[T]) (items []T, err error) {
 	items = make([]T, 0)
@@ -40,4 +52,9 @@ func ToChannels[T any](ctx context.Context, src Observable[T]) (<-chan T, <-chan
 		close(errs)
 	}()
 	return out, errs
+}
+
+// Discard discards all items from 'src' and returns an error if any.
+func Discard[T any](ctx context.Context, src Observable[T]) error {
+	return src.Observe(ctx, func(item T) error { return nil })
 }
