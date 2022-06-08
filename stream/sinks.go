@@ -14,9 +14,14 @@ import (
 // First returns the first item from 'src' observable and then closes it.
 func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
 	subCtx, cancel := context.WithCancel(ctx)
+	taken := false
 	err = src.Observe(subCtx,
 		func(x T) error {
+			if taken {
+				return nil
+			}
 			item = x
+			taken = true
 			cancel()
 			return nil
 		})
