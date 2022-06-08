@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Jussi Maki
 
-package goreactive
+package stream
 
 import (
 	"context"
@@ -17,10 +17,10 @@ type Observable[T any] interface {
 	// When 'ctx' is cancelled the stream closes and ctx.Err() is returned.
 	//
 	// Implementations of Observe() must maintain the following invariants:
-	// - Observe blocks until the stream and any upstreams are closed. 
+	// - Observe blocks until the stream and any upstreams are closed.
 	// - 'next' is called sequentially from the goroutine that called Observe() in
 	//   order to maintain good stack traces and not require observer to be thread-safe.
-	// - if 'next' returns an error it must not be called again and the same error 
+	// - if 'next' returns an error it must not be called again and the same error
 	//   must be returned by Observe().
 	//
 	// Handling of context cancellation is asynchronous and implementation may
@@ -79,11 +79,11 @@ func Discard[T any](ctx context.Context, src Observable[T]) error {
 func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
 	subCtx, cancel := context.WithCancel(ctx)
 	err = src.Observe(subCtx,
-	           func(x T) error {
-		           item = x
-		           cancel()
-		           return nil
-	           })
+		func(x T) error {
+			item = x
+			cancel()
+			return nil
+		})
 	return
 }
 
@@ -118,7 +118,6 @@ func ToSlice[T any](ctx context.Context, src Observable[T]) (items []T, err erro
 	return
 }
 
-
 // FromChannel creates an observable from a channel. The channel is consumed
 // by the first observer.
 func FromChannel[T any](in <-chan T) Observable[T] {
@@ -129,7 +128,7 @@ func FromChannel[T any](in <-chan T) Observable[T] {
 			// if we just do for+select we don't know if 'in' is
 			// closed and should stop.
 
-			for v := range(in) {
+			for v := range in {
 				if ctx.Err() != nil {
 					return ctx.Err()
 				}
@@ -164,7 +163,7 @@ func ToChannels[T any](ctx context.Context, src Observable[T]) (<-chan T, <-chan
 func Map[A, B any](src Observable[A], apply func(A) B) Observable[B] {
 	return FuncObservable[B](
 		func(ctx context.Context, next func(B) error) error {
-			 return src.Observe(
+			return src.Observe(
 				ctx,
 				func(a A) error { return next(apply(a)) })
 		})
@@ -175,12 +174,12 @@ func Map[A, B any](src Observable[A], apply func(A) B) Observable[B] {
 func FlatMap[A, B any](src Observable[A], apply func(A) Observable[B]) Observable[B] {
 	return FuncObservable[B](
 		func(ctx context.Context, next func(B) error) error {
-			 return src.Observe(
+			return src.Observe(
 				ctx,
 				func(a A) error {
 					return apply(a).Observe(
 						ctx,
-				                next)
+						next)
 
 				})
 		})
@@ -263,12 +262,12 @@ func ParallelMap[A, B any](src Observable[A], par int, apply func(A) B) Observab
 
 			// Drain items from out to avoid blocking workers if we stopped above
 			// due to 'next' error.
-			for range out {}
+			for range out {
+			}
 
 			return <-observeErrs
 		})
 }
-
 
 // Filter keeps only the elements for which the filter function returns true.
 func Filter[T any](src Observable[T], filter func(T) bool) Observable[T] {
@@ -277,10 +276,10 @@ func Filter[T any](src Observable[T], filter func(T) bool) Observable[T] {
 			return src.Observe(
 				ctx,
 				func(x T) error {
-				  if filter(x) {
-					  return next(x)
-				  }
-				  return nil
+					if filter(x) {
+						return next(x)
+					}
+					return nil
 				})
 		})
 }
@@ -333,9 +332,9 @@ func Concat[T any](srcs ...Observable[T]) Observable[T] {
 // towards the source.
 func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Observable[T] {
 	var (
-		mu sync.RWMutex
-		subId int
-		subs = make(map[int]chan T)
+		mu           sync.RWMutex
+		subId        int
+		subs         = make(map[int]chan T)
 		observeError error
 	)
 
@@ -406,7 +405,8 @@ func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Obser
 
 			// Drain all items to unblock worker until we acquire the lock.
 			go func() {
-				for range items {}
+				for range items {
+				}
 			}()
 
 			// When we acquire a lock, we know we have exclusive access to 'items'
@@ -446,7 +446,6 @@ func CoalesceByKey[K comparable, V any](src Observable[V], toKey func(V) K, buff
 		})
 }
 
-
 type mergeNext[T any] struct {
 	item T
 	errs chan error
@@ -454,7 +453,7 @@ type mergeNext[T any] struct {
 
 // Merge multiple observables into one. Error from one of the sources cancels
 // context and completes the stream.
-func Merge[T any](srcs...Observable[T]) Observable[T] {
+func Merge[T any](srcs ...Observable[T]) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
 			mergeCtx, cancel := context.WithCancel(ctx)
@@ -479,11 +478,11 @@ func Merge[T any](srcs...Observable[T]) Observable[T] {
 				go func(src Observable[T]) {
 					nextErrs := make(chan error, 1)
 					errs <- src.Observe(
-						    mergeCtx,
-				                    func(item T) error {
-						    	reqs <- mergeNext[T]{item, nextErrs}
-						        return <-nextErrs
-				                    })
+						mergeCtx,
+						func(item T) error {
+							reqs <- mergeNext[T]{item, nextErrs}
+							return <-nextErrs
+						})
 					wg.Done()
 				}(src)
 			}
@@ -494,7 +493,8 @@ func Merge[T any](srcs...Observable[T]) Observable[T] {
 			// 'errs'.
 			var err error
 			srcsRunning := len(srcs)
-			loop: for srcsRunning > 0 {
+		loop:
+			for srcsRunning > 0 {
 				select {
 				case err = <-errs:
 					if err != nil {
@@ -539,7 +539,7 @@ func Interval(interval time.Duration) Observable[int] {
 			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
 			done := ctx.Done()
-			for i := 0 ;; i++ {
+			for i := 0; ; i++ {
 				select {
 				case <-done:
 					return ctx.Err()
@@ -606,15 +606,15 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 		func(ctx context.Context, next func(T) error) error {
 			ctx, cancel := context.WithCancel(ctx)
 			err := src.Observe(ctx,
-			            func(item T) error {
-				            if n > 0 {
-					            next(item)
-					            n--
-				            } else {
-					            cancel()
-				            }
-				            return nil
-			            })
+				func(item T) error {
+					if n > 0 {
+						next(item)
+						n--
+					} else {
+						cancel()
+					}
+					return nil
+				})
 
 			// If all 'n' items were emitted, ignore the cancelled
 			// error.
@@ -624,7 +624,6 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 			return err
 		})
 }
-
 
 // SplitHead splits the source 'src' into two: 'head' which receives the first item,
 // and 'tail' that receives the rest. Errors from source are only handed to 'tail'.
@@ -637,13 +636,13 @@ func SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T]
 			err := src.Observe(
 				ctx,
 				func(item T) error {
-				    if first {
-					    headChan <- item
-					    close(headChan)
-					    first = false
-					    return nil
-				    }
-				    return next(item)
+					if first {
+						headChan <- item
+						close(headChan)
+						first = false
+						return nil
+					}
+					return next(item)
 				})
 			if first {
 				// First element never arrived.

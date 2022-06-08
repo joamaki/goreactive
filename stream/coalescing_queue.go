@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Jussi Maki
 
-package goreactive
+package stream
 
 import (
 	"container/list"
@@ -20,16 +20,16 @@ type coalescingQueue[K comparable, V any] struct {
 	nonEmptyCond *sync.Cond
 
 	bufSize int
-	values map[K]V
-	queue *list.List
-	closed bool
+	values  map[K]V
+	queue   *list.List
+	closed  bool
 }
 
 func newCoalescingQueue[K comparable, V any](bufSize int) *coalescingQueue[K, V] {
-	q := &coalescingQueue[K,V]{
+	q := &coalescingQueue[K, V]{
 		bufSize: bufSize,
-		values: make(map[K]V),
-		queue: list.New(),
+		values:  make(map[K]V),
+		queue:   list.New(),
 	}
 	q.fullCond = sync.NewCond(q)
 	q.nonEmptyCond = sync.NewCond(q)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Jussi Maki
 
-package goreactive
+package stream
 
 import (
 	"context"
@@ -37,7 +37,7 @@ func TestFromSliceToSlice(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	xs := []int{1,2,3,4}
+	xs := []int{1, 2, 3, 4}
 
 	// 1. non-empty FromSlice->ToSlice
 	xs1, err := ToSlice(ctx, FromSlice(xs))
@@ -136,7 +136,7 @@ func TestRangeTake(t *testing.T) {
 	// 1. take 5 from source with 10 items.
 	zeroToFour, err := ToSlice(ctx, Take(5, Range(0, 10)))
 	assertNil(t, "case 1", err)
-	assertSlice(t, "case 1", []int{0,1,2,3,4}, zeroToFour)
+	assertSlice(t, "case 1", []int{0, 1, 2, 3, 4}, zeroToFour)
 
 	// 2. take 0 from source with 10 items.
 	empty, err := ToSlice(ctx, Take(0, Range(0, 10)))
@@ -157,7 +157,7 @@ func TestRangeTake(t *testing.T) {
 		})
 	ones, err := ToSlice(ctx, Take[int](5, onesSrc))
 	assertNil(t, "case 3", err)
-	assertSlice(t, "case 3", []int{1,1,1,1,1}, ones)
+	assertSlice(t, "case 3", []int{1, 1, 1, 1, 1}, ones)
 	if !wasCancelled {
 		t.Fatalf("upstream source not cancelled")
 	}
@@ -189,7 +189,7 @@ func TestMap(t *testing.T) {
 	// 3. cancelled context
 	cancel()
 	{
-		src := Map(Range(0,100), double)
+		src := Map(Range(0, 100), double)
 		result, err := ToSlice(ctx, src)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("case 3: expected Canceled error, got %s", err)
@@ -226,7 +226,7 @@ func TestFlatMap(t *testing.T) {
 	// 3. cancelled context
 	cancel()
 	{
-		src := FlatMap(Range(0,100), negated)
+		src := FlatMap(Range(0, 100), negated)
 		result, err := ToSlice(ctx, src)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("case 3: expected Canceled error, got %s", err)
@@ -264,7 +264,7 @@ func TestParallelMap(t *testing.T) {
 	// 3. cancelled context
 	cancel()
 	{
-		src := ParallelMap(Range(0,100), 5, double)
+		src := ParallelMap(Range(0, 100), 5, double)
 		result, err := ToSlice(ctx, src)
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("case 3: expected Canceled error, got %s", err)
@@ -282,7 +282,7 @@ func TestConcat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("case 1 errored: %s", err)
 	}
-	assertSlice(t, "case 1", res1, []int{1,2,3})
+	assertSlice(t, "case 1", res1, []int{1, 2, 3})
 
 	// 2. test cancelled concat
 	ctx2, cancel2 := context.WithCancel(context.Background())
@@ -307,7 +307,7 @@ func TestBroadcast(t *testing.T) {
 
 	numSubs := 3
 
-	expected := []int{1,2,3,4,5}
+	expected := []int{1, 2, 3, 4, 5}
 
 	in := make(chan int)
 
@@ -350,7 +350,8 @@ func TestBroadcast(t *testing.T) {
 	}
 
 	// Synchronize with workers by feeding 0s until all workers have acked.
-	nextSub: for i := 0; i < numSubs; i++ {
+nextSub:
+	for i := 0; i < numSubs; i++ {
 		for {
 			select {
 			case in <- 0:
@@ -370,7 +371,7 @@ func TestBroadcast(t *testing.T) {
 
 	// Process errors from the subscribers
 	for i := 0; i < numSubs; i++ {
-		err := <- subErrs
+		err := <-subErrs
 		if err != nil {
 			t.Fatalf("error: %s", err)
 		}
@@ -381,7 +382,7 @@ func TestMerge(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	expected := []int{1,2,3,4,5,6,7,8,9}
+	expected := []int{1, 2, 3, 4, 5, 6, 7, 8, 9}
 
 	in1 := FromSlice(expected[0:3])
 	in2 := FromSlice(expected[3:6])
@@ -504,7 +505,7 @@ func TestSplitHead(t *testing.T) {
 	// until it is instantiated.
 	tailItems, err := ToSlice(ctx, tailSrc)
 	assertNil(t, "ToSlice(tail)", err)
-	assertSlice(t, "tail", []int{1,2,3,4}, tailItems)
+	assertSlice(t, "tail", []int{1, 2, 3, 4}, tailItems)
 
 	headItems, err := ToSlice(ctx, headSrc)
 	assertNil(t, "ToSlice(head)", err)
@@ -534,10 +535,10 @@ func BenchmarkMerge(b *testing.B) {
 	count := 0
 	err := Merge(FromSlice(s)).Observe(
 		ctx,
-                func(item int) error {
-                        count++
-                        return nil
-                })
+		func(item int) error {
+			count++
+			return nil
+		})
 
 	if err != nil {
 		b.Fatal(err)
@@ -556,10 +557,10 @@ func BenchmarkBroadcast(b *testing.B) {
 	count := 0
 	err := Broadcast(ctx, 16, FromSlice(s)).Observe(
 		ctx,
-                func(item int) error {
-                        count++
-                        return nil
-                })
+		func(item int) error {
+			count++
+			return nil
+		})
 
 	if err != nil {
 		b.Fatal(err)
@@ -577,13 +578,13 @@ func BenchmarkMap(b *testing.B) {
 
 	count := 0
 	err :=
-	  Map(FromSlice(s), func(x int) int { return x*2 }).
-	    Observe(
-	      ctx,
-              func(item int) error {
-	              count++
-	              return nil
-              })
+		Map(FromSlice(s), func(x int) int { return x * 2 }).
+			Observe(
+				ctx,
+				func(item int) error {
+					count++
+					return nil
+				})
 
 	if err != nil {
 		b.Fatal(err)
@@ -601,14 +602,14 @@ func BenchmarkParallelMap(b *testing.B) {
 
 	count := 0
 	err :=
-	  ParallelMap(FromSlice(s), runtime.NumCPU(),
-	              func(x int) int { return x*2 }).
-	    Observe(
-	      ctx,
-              func(item int) error {
-	              count++
-	              return nil
-              })
+		ParallelMap(FromSlice(s), runtime.NumCPU(),
+			func(x int) int { return x * 2 }).
+			Observe(
+				ctx,
+				func(item int) error {
+					count++
+					return nil
+				})
 
 	if err != nil {
 		b.Fatal(err)
@@ -660,18 +661,17 @@ func fromCallback[T any](bufSize int) (emit func(T), complete func(error), obs O
 		func(ctx context.Context, next func(T) error) error {
 			for {
 				select {
-					case <-ctx.Done():
-						return ctx.Err()
-					case err := <- errs:
+				case <-ctx.Done():
+					return ctx.Err()
+				case err := <-errs:
+					return err
+				case item := <-items:
+					if err := next(item); err != nil {
 						return err
-					case item := <- items:
-						if err := next(item); err != nil {
-							return err
-						}
+					}
 				}
 			}
 		})
 
 	return
 }
-

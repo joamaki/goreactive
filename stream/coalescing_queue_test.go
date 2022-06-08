@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2022 Jussi Maki
 
-package goreactive
+package stream
 
 import "testing"
-
 
 func TestCoalesingQueue(t *testing.T) {
 	q := newCoalescingQueue[int, string](16)
@@ -15,7 +14,9 @@ func TestCoalesingQueue(t *testing.T) {
 	q.Push(3, "three")
 
 	k, v, ok := q.Pop()
-	if !ok { t.Fatalf("expected pop to succeed") }
+	if !ok {
+		t.Fatalf("expected pop to succeed")
+	}
 	if v != "oneone" {
 		t.Fatalf("expected \"oneone\", but got %s", v)
 	}
@@ -24,7 +25,9 @@ func TestCoalesingQueue(t *testing.T) {
 	}
 
 	k, v, ok = q.Pop()
-	if !ok { t.Fatalf("expected pop to succeed") }
+	if !ok {
+		t.Fatalf("expected pop to succeed")
+	}
 	if v != "two" {
 		t.Fatalf("expected \"two\", but got %s", v)
 	}
@@ -36,7 +39,9 @@ func TestCoalesingQueue(t *testing.T) {
 
 	// We can still drain items after it's closed.
 	k, v, ok = q.Pop()
-	if !ok { t.Fatalf("expected pop to succeed") }
+	if !ok {
+		t.Fatalf("expected pop to succeed")
+	}
 	if v != "three" {
 		t.Fatalf("expected pop to return latest (three), but got %s", v)
 	}
@@ -44,7 +49,7 @@ func TestCoalesingQueue(t *testing.T) {
 		t.Fatalf("expected key 3, got %d", k)
 	}
 
-	// Pushing after it's closed should be no-op 
+	// Pushing after it's closed should be no-op
 	q.Push(1, "oneoneone")
 
 	_, _, ok = q.Pop()

@@ -11,11 +11,11 @@ import (
 	"net/http"
 	"time"
 
-	. "github.com/joamaki/goreactive"
+	"github.com/joamaki/goreactive/stream"
 )
 
-func HTTPGetByLine(url string) Observable[string] {
-	return FuncObservable[string](
+func HTTPGetByLine(url string) stream.Observable[string] {
+	return stream.FuncObservable[string](
 		func(ctx context.Context, next func(string) error) error {
 			req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 			if err != nil {
@@ -74,4 +74,3 @@ func startHTTPServer() (string, *http.Server) {
 	}()
 	return "http://" + listener.Addr().String(), srv
 }
-
