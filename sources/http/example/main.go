@@ -11,7 +11,7 @@ import (
 	"net/http"
 	"time"
 
-	httpClient "github.com/joamaki/goreactive/clients/http"
+	httpClient "github.com/joamaki/goreactive/sources/http"
 	"github.com/joamaki/goreactive/stream"
 )
 

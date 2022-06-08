@@ -19,7 +19,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/joamaki/goreactive/clients/k8s"
+	"github.com/joamaki/goreactive/sources/k8s"
 	. "github.com/joamaki/goreactive/stream"
 )
 

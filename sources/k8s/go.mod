@@ -1,4 +1,4 @@
-module github.com/joamaki/goreactive/clients/k8s
+module github.com/joamaki/goreactive/sources/k8s
 
 go 1.18
 

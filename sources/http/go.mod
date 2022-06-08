@@ -1,4 +1,4 @@
-module github.com/joamaki/goreactive/clients/http
+module github.com/joamaki/goreactive/sources/http
 
 go 1.18
 
