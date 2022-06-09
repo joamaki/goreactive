@@ -414,6 +414,30 @@ func TestBuffer(t *testing.T) {
 	}
 }
 
+func TestTakeSkip(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	skippedSrc := Skip(10, Range(0, 20))
+	skipped, err := ToSlice(ctx, skippedSrc)
+	assertNil(t, "ToSlice", err)
+	expected, err := ToSlice(ctx, Range(10, 20))
+	assertNil(t, "ToSlice", err)
+	assertSlice(t, "skip 10", expected, skipped)
+
+	takenSrc := Take(5, skippedSrc)
+	expected, err = ToSlice(ctx, Range(10, 15))
+	assertNil(t, "ToSlice", err)
+
+	taken1, err := ToSlice(ctx, takenSrc)
+	assertNil(t, "ToSlice", err)
+	assertSlice(t, "skip 10, take 5", expected, taken1)
+
+	taken2, err := ToSlice(ctx, takenSrc)
+	assertNil(t, "ToSlice", err)
+	assertSlice(t, "skip 10, take 5", expected, taken2)
+}
+
 //
 // Benchmarks
 //

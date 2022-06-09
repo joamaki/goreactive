@@ -140,14 +140,14 @@ func Filter[T any](src Observable[T], filter func(T) bool) Observable[T] {
 
 // Reduce takes an initial state, and a function 'reduce' that is called on each element
 // along with a state and returns an observable with a single result state.
-func Reduce[T, Result any](src Observable[T], init Result, reduce func(T, Result) Result) Observable[Result] {
+func Reduce[T, Result any](src Observable[T], init Result, reduce func(Result, T) Result) Observable[Result] {
 	result := init
 	return FuncObservable[Result](
 		func(ctx context.Context, next func(Result) error) error {
 			err := src.Observe(
 				ctx,
 				func(x T) error {
-					result = reduce(x, result)
+					result = reduce(result, x)
 					return nil
 				})
 			if err != nil {
@@ -513,11 +513,12 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
 			ctx, cancel := context.WithCancel(ctx)
+			remaining := n
 			err := src.Observe(ctx,
 				func(item T) error {
-					if n > 0 {
+					if remaining > 0 {
 						next(item)
-						n--
+						remaining--
 					} else {
 						cancel()
 					}
@@ -526,10 +527,26 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 
 			// If all 'n' items were emitted, ignore the cancelled
 			// error.
-			if n == 0 && errors.Is(err, context.Canceled) {
+			if remaining == 0 && errors.Is(err, context.Canceled) {
 				return nil
 			}
 			return err
+		})
+}
+
+// Skip skips the first 'n' items from the source.
+func Skip[T any](n int, src Observable[T]) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			skip := n
+			return src.Observe(ctx,
+				func(item T) error {
+					if skip > 0 {
+						skip--
+						return nil
+					}
+					return next(item)
+				})
 		})
 }
 
