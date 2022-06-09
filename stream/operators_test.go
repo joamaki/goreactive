@@ -128,7 +128,7 @@ func TestConcat(t *testing.T) {
 	defer cancel()
 
 	// 1. successful case
-	res1, err := ToSlice(ctx, Concat(Single(1), Single(2), Single(3)))
+	res1, err := ToSlice(ctx, Concat(Just(1), Just(2), Just(3)))
 	if err != nil {
 		t.Fatalf("case 1 errored: %s", err)
 	}
@@ -137,11 +137,11 @@ func TestConcat(t *testing.T) {
 	// 2. test cancelled concat
 	ctx2, cancel2 := context.WithCancel(context.Background())
 	cancel2()
-	res2, err := ToSlice(ctx2, Concat(Single(1), Stuck[int]()))
+	res2, err := ToSlice(ctx2, Concat(Just(1), Stuck[int]()))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("case 2 expected Canceled error, got %s", err)
 	}
-	assertSlice(t, "case 2", []int{1}, res2)
+	assertSlice(t, "case 2", []int{}, res2)
 
 	// 3. test empty concat
 	res3, err := ToSlice(ctx, Concat[int]())
@@ -387,9 +387,9 @@ func TestBuffer(t *testing.T) {
 	assertSlice(t, "empty drop", []int{}, ticksSlice)
 
 	// Test with one item source
-	ticksSlice = takeSlowly(Buffer(Single(1), 10, BackpressureBlock))
+	ticksSlice = takeSlowly(Buffer(Just(1), 10, BackpressureBlock))
 	assertSlice(t, "single block", []int{1}, ticksSlice)
-	ticksSlice = takeSlowly(Buffer(Single(1), 10, BackpressureDrop))
+	ticksSlice = takeSlowly(Buffer(Just(1), 10, BackpressureDrop))
 	assertSlice(t, "single drop", []int{1}, ticksSlice)
 
 	// Test blocking strategy

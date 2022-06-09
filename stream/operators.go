@@ -440,7 +440,7 @@ func Buffer[T any](src Observable[T], bufSize int, strategy BackpressureStrategy
 					return nil
 				}
 			} else {
-				panic(fmt.Sprintf("unknown strategy: %d", strategy))
+				return fmt.Errorf("Unknown backpressure strategy: %d", strategy)
 			}
 
 			errs := make(chan error, 1)

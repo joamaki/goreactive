@@ -12,10 +12,13 @@ import (
 // Sources, e.g. operators that create new observables.
 //
 
-// Single creates an observable with a single item.
-func Single[T any](item T) Observable[T] {
+// Just creates an observable with a single item.
+func Just[T any](item T) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return next(item)
 		})
 }
@@ -48,18 +51,15 @@ func Empty[T any]() Observable[T] {
 func FromSlice[T any](items []T) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
-			var err error
 			for _, item := range items {
 				if ctx.Err() != nil {
-					err = ctx.Err()
-					break
+					return ctx.Err()
 				}
-				err = next(item)
-				if err != nil {
-					break
+				if err := next(item); err != nil {
+					return err
 				}
 			}
-			return err
+			return nil
 		})
 }
 

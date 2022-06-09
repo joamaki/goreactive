@@ -9,12 +9,12 @@ import (
 	"testing"
 )
 
-func TestSingleFirstStuck(t *testing.T) {
+func TestJustFirstStuck(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// 1. successful Single with First
-	res1, err := First(ctx, Single(1))
+	// 1. successful Just with First
+	res1, err := First(ctx, Just(1))
 	assertNil(t, "case 1", err)
 	if res1 != 1 {
 		t.Fatalf("case 1: expected 1, got %d", res1)

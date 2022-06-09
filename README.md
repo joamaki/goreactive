@@ -97,7 +97,7 @@ Tour of the operators
 implementing `Observe` by hand:
 
 ```go
-Single(10)                 // emits 10
+Just(10)                 // emits 10
 Error(errors.New("oh no")) // returns error without emitting items
 Empty()                    // returns nil error without emitting items
 FromSlice([]int{1,2,3})    // emits 1,2,3 and completes
@@ -153,7 +153,7 @@ Take(10, src)              // take 10 items from 'src' and then complete it.
 Buffer(src, 16, BackpressureDrop) // buffer up to 16 items from 'src' and drop items if buffer is full
 
 // SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T])
-SplitHead(Range(0,10)) => (Single(0), Range(1,10))
+SplitHead(Range(0,10)) => (Just(0), Range(1,10))
 ```
 
 [Sinks](stream/sinks.go) consume streams:
