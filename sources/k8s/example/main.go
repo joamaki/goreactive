@@ -88,7 +88,7 @@ func main() {
 	// Combine everything into a stream of update messages.
 	updates :=
 		Merge(
-			Single("Waiting for updates...\n"),
+			Just("Waiting for updates...\n"),
 
 			Map(pods,
 				func(item k8s.Item[*v1.Pod]) string {
@@ -112,6 +112,9 @@ func main() {
 					return fmt.Sprintf("endpoints %s updated:\n%s\n", item.Key, endpointsDiffer.diff(item.Key, item.Object))
 				}),
 		)
+
+	// Only display 3 updates per second
+	updates = Throttle(updates, 3.0, 3)
 
 	err = updates.Observe(ctx,
 		func(desc string) error {
