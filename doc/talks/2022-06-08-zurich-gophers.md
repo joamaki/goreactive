@@ -3,6 +3,7 @@ title: Going reactive with Go Generics
 theme: solarized
 highlightTheme: a11y-light
 revealOptions:
+  width: 1280
   transition: 'none'
 ---
 
@@ -16,8 +17,9 @@ revealOptions:
 ## Outline of the talk
 
 - Reactive programming?
+- Examples
 - Demo
-- Tour of the API and implementation
+- Tour of the library
 - Q&A
 
 ---
@@ -33,16 +35,17 @@ revealOptions:
 
 ### Reactive programming?
 
-- Reactive programming is about building systems out of event streams
+- Reactive programming (to me) is a modular way of composing systems out
+  of event streams.
 - Think unix pipes
-- Libraries provide the language for composing and transforming the streams
+- A reactive library provides the language for composing and transforming streams
 
 ---
 
 ### Reactive Extensions (ReactiveX)
 
-- API for reactive programming from Microsoft (2011)
-- Implementations for many languages, including Go (RxGo)
+- API for reactive programming originally from Microsoft (2011)
+- Official implementations for many languages, including Go (RxGo)
 - My library roughly follows the API
 
 ---
@@ -73,8 +76,8 @@ getDataFromNetwork()
 
 ```shell
 curl https://go.dev | \
-  tail -n +10 | \
-  tail -n 5 | \
+  tail -n +10       | \
+  head -n 5         | \
   awk '{ print $1 " transformed" }'
 ```
 
@@ -131,13 +134,10 @@ type Observable[T any] interface {
 ### A trivial Observable
 
 ```go
-type singleIntegerObservable int
+type JustInt int
 
-func (num singleIntegerObservable) Observe(
-    ctx context.Context,
-    next func(int) error,
-) error {
-      return next(int(num))
+func (num JustInt) Observe(ctx context.Context, next func(int) error) error {
+        return next(int(num))
 }
 ```
 
@@ -147,12 +147,11 @@ func (num singleIntegerObservable) Observe(
 
 ```go
 func main() {
-    var ten stream.Observable[int] =
-      singleIntegerObservable(10)
+    var ten stream.Observable[int] = JustInt(10)
 
     stream.Map(
-        ten,
-        func(x int) int { return x * 2 },
+      ten,
+      func(x int) int { return x * 2 },
     ).Observe(
         context.Background(),
         func(x int) error {
@@ -175,9 +174,12 @@ func (f FuncObservable[T]) Observe(ctx context.Context, next func(T) error) erro
 	return f(ctx, next)
 }
 
-func Single[T any](item T) Observable[T] {
+func Just[T any](item T) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			return next(item)
 		})
 }
@@ -190,7 +192,7 @@ func Single[T any](item T) Observable[T] {
 ```go
 // func <<source>>[T any](...) Observable[T]
 
-Single(10)                 // emits 10
+Just(10)                 // emits 10
 Error(errors.New("oh no")) // errors without emitting
 Empty()                    // completes immediately
 FromSlice([]int{1,2,3})    // emits 1,2,3 and completes
@@ -217,10 +219,7 @@ Map(Range(0, 3), double) == FromSlice([]int{0,2,4})
 ### Map implementation
 
 ```go
-func Map[A, B any](
-    src Observable[A],
-    apply func(A) B,
-) Observable[B] {
+func Map[A, B any](src Observable[A], apply func(A) B) Observable[B] {
     return FuncObservable[B](
         func(ctx context.Context, next func(B) error) error {
             return src.Observe(
@@ -285,6 +284,27 @@ Merge(Range(0, 10), Range(10, 20))  == [0..20] in some order
 
 Throttle(src, 10.0, 5)
   => items from 'src' emitted at most 10 per second
+```
+---
+
+### Operators: Throttle (implementation)
+
+```go
+import "golang.org/x/time/rate"
+func Throttle[T any](src Observable[T], ratePerSecond float64, burst int) Observable[T] {
+    return FuncObservable[T](
+        func(ctx context.Context, next func(T) error) error {
+            limiter := rate.NewLimiter(rate.Limit(ratePerSecond), burst)
+            return src.Observe(
+                ctx,
+                func(item T) error {
+                    if err := limiter.Wait(ctx); err != nil {
+                        return err
+                    }
+                    return next(item)
+               })
+        })
+}
 ```
 
 ---
