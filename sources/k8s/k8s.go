@@ -160,7 +160,7 @@ func Resource[T k8sRuntime.Object](ctx context.Context, resource string, namespa
 				}
 
 				if len(initialVersions) > 0 {
-					version := resourceVersion(obj)
+					version := resourceVersion(rawObj)
 					if initialVersion, ok := initialVersions[key]; ok {
 						// We can now forget the initial version.
 						delete(initialVersions, key)
@@ -184,9 +184,11 @@ func Resource[T k8sRuntime.Object](ctx context.Context, resource string, namespa
 }
 
 func resourceVersion(obj any) (version string) {
-	meta, err := meta.Accessor(obj)
-	if err == nil {
-		return meta.GetResourceVersion()
+	if obj != nil {
+		meta, err := meta.Accessor(obj)
+		if err == nil {
+			return meta.GetResourceVersion()
+		}
 	}
 	return ""
 }
