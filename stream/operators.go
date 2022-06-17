@@ -305,20 +305,21 @@ type mergeNext[T any] struct {
 	errs chan error
 }
 
-// Merge multiple observables into one. Error from one of the sources cancels
-// context and completes the stream.
+// Merge multiple observables into one. Error from any one of the sources will
+// cancel and complete the stream. Error from downstream is propagated to the
+// upstream that emitted the item.
 //
 // Beware: the observables are observed from goroutines spawned by Merge()
-// and thus run concurrently (e.g. functions Map()'d on the input sources need to
-// be thread-safe).
+// and thus run concurrently, e.g. functions doFoo and doBar are called from
+// different goroutines than Observe():
+//   Merge(Map(foo, doFoo), Map(bar, doBar)).Observe(...)
 func Merge[T any](srcs ...Observable[T]) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
 			mergeCtx, cancel := context.WithCancel(ctx)
 			defer cancel()
 
-			reqs := make(chan mergeNext[T], len(srcs))
-			defer close(reqs)
+			items := make(chan mergeNext[T], len(srcs))
 
 			errs := make(chan error, len(srcs))
 			defer close(errs)
@@ -334,59 +335,50 @@ func Merge[T any](srcs ...Observable[T]) Observable[T] {
 			// Observe().
 			for _, src := range srcs {
 				go func(src Observable[T]) {
+					defer wg.Done()
+
 					nextErrs := make(chan error, 1)
+					defer close(nextErrs)
+
 					errs <- src.Observe(
 						mergeCtx,
 						func(item T) error {
-							reqs <- mergeNext[T]{item, nextErrs}
+							items <- mergeNext[T]{item, nextErrs}
 							return <-nextErrs
 						})
-					wg.Done()
 				}(src)
 			}
 
-			// Feed downstream until either all sources have finished,
-			// or a source encounters an error. Errors from downstream
-			// are propagated upstream and come back down here through
-			// 'errs'.
-			var err error
-			srcsRunning := len(srcs)
-		loop:
-			for srcsRunning > 0 {
-				select {
-				case err = <-errs:
-					if err != nil {
-						break loop
+			// Fork a goroutine to handle errors.
+			var finalError error
+			go func() {
+				srcsRunning := len(srcs)
+
+				firstError := true
+				for srcsRunning > 0 {
+					select {
+					case err := <-errs:
+						if err != nil && firstError {
+							// Remember the error and cancel the context
+							// to stop other upstreams.
+							finalError = err
+							firstError = false
+							cancel()
+						}
+						srcsRunning--
 					}
-					srcsRunning--
-				case req := <-reqs:
-					req.errs <- next(req.item)
 				}
+
+				wg.Wait()
+				close(items)
+			}()
+
+			// Feed downstream until all sources are done.
+			for req := range items {
+				req.errs <- next(req.item)
 			}
 
-			// Wait for all sources to terminate.
-			cancel()
-			wg.Wait()
-
-			return err
-		})
-}
-
-// Delay emits item from input at most once per given time interval.
-func Delay[T any](src Observable[T], interval time.Duration) Observable[T] {
-	return FuncObservable[T](
-		func(ctx context.Context, next func(T) error) error {
-			ticker := time.NewTicker(interval)
-			defer ticker.Stop()
-			return src.Observe(
-				ctx,
-				func(item T) error {
-					select {
-					case <-ctx.Done():
-					case <-ticker.C:
-					}
-					return next(item)
-				})
+			return finalError
 		})
 }
 
@@ -406,15 +398,33 @@ func Throttle[T any](src Observable[T], ratePerSecond float64, burst int) Observ
 		})
 }
 
+// Delay shifts the items emitted from source by the given duration.
+func Delay[T any](src Observable[T], duration time.Duration) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			first := true
+			return src.Observe(
+				ctx,
+				func(item T) error {
+					if first {
+						time.Sleep(duration)
+						first = false
+					}
+					return next(item)
+				})
+
+		})
+}
+
+type BackpressureStrategy string
 const (
 	// Items are dropped if buffer is full
-	BackpressureDrop = iota
+	BackpressureDrop = BackpressureStrategy("drop")
 
 	// Observing blocks until there is room in the buffer
-	BackpressureBlock
+	BackpressureBlock = BackpressureStrategy("block")
 )
 
-type BackpressureStrategy int
 
 // Buffer buffers 'n' items with configurable backpressure strategy.
 // Downstream errors are not propagated towards 'src'.
@@ -440,7 +450,7 @@ func Buffer[T any](src Observable[T], bufSize int, strategy BackpressureStrategy
 					return nil
 				}
 			} else {
-				return fmt.Errorf("Unknown backpressure strategy: %d", strategy)
+				return fmt.Errorf("Unknown backpressure strategy: %q", strategy)
 			}
 
 			errs := make(chan error, 1)
@@ -488,21 +498,6 @@ func OnNext[T any](src Observable[T], f func(T)) Observable[T] {
 				})
 		})
 
-}
-
-// Retry resubscribes to the observable if it completes with an error.
-func Retry[T any](src Observable[T], shouldRetry func(err error) bool) Observable[T] {
-	return FuncObservable[T](
-		func(ctx context.Context, next func(T) error) error {
-			for {
-				err := src.Observe(
-					ctx,
-					next)
-				if !shouldRetry(err) {
-					return err
-				}
-			}
-		})
 }
 
 // Take takes 'n' items from the source 'src'.
@@ -577,4 +572,72 @@ func SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T]
 
 		})
 	return
+}
+
+//
+// Retrying and error handling
+// 
+
+// RetryFunc decides whether the processing should be retried for the given error
+type RetryFunc func(err error) bool
+
+// Retry resubscribes to the observable if it completes with an error.
+func Retry[T any](src Observable[T], shouldRetry RetryFunc) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			for {
+				err := src.Observe(
+					ctx,
+					next)
+				if !shouldRetry(err) {
+					return err
+				}
+			}
+		})
+}
+
+// RetryNext retries the call to 'next' if it returned an error.
+func RetryNext[T any](src Observable[T], shouldRetry RetryFunc) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			retriedNext := func(item T) error {
+				err := next(item)
+				for err != nil && shouldRetry(err) {
+					err = next(item)
+				}
+				return err
+			}
+			return src.Observe(ctx, retriedNext)
+		})
+}
+
+// AlwaysRetry always asks for a retry regardless of the error.
+func AlwaysRetry(err error) bool {
+	return true
+}
+
+// BackoffRetry retries with an exponential backoff.
+func BackoffRetry(shouldRetry RetryFunc, minBackoff, maxBackoff time.Duration) RetryFunc {
+	backoff := minBackoff
+	return func(err error) bool {
+		time.Sleep(backoff)
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+		return shouldRetry(err)
+	}
+
+}
+
+// LimitRetries limits the number of retries with the given retry method.
+// e.g. LimitRetries(BackoffRetry(time.Millisecond, time.Second), 5)
+func LimitRetries(shouldRetry RetryFunc, numRetries int) RetryFunc {
+	return func(err error) bool {
+		if numRetries <= 0 {
+			return false
+		}
+		numRetries--
+		return shouldRetry(err)
+	}
 }

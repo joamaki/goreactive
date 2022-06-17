@@ -15,7 +15,7 @@ import (
 func assertSlice[T comparable](t *testing.T, what string, expected []T, actual []T) {
 	t.Helper()
 	if len(expected) != len(actual) {
-		t.Fatalf("assertSlice[%s]: expected %d items, got %d", what, len(expected), len(actual))
+		t.Fatalf("assertSlice[%s]: expected %d items, got %d (%v)", what, len(expected), len(actual), actual)
 	}
 	for i := range expected {
 		if expected[i] != actual[i] {

@@ -40,6 +40,7 @@ func (q *coalescingQueue[K, V]) Close() {
 	q.Lock()
 	q.closed = true
 	q.nonEmptyCond.Signal()
+	q.fullCond.Signal()
 	q.Unlock()
 }
 
@@ -47,20 +48,22 @@ func (q *coalescingQueue[K, V]) Push(k K, v V) {
 	q.Lock()
 	defer q.Unlock()
 
-	if q.closed {
-		return
-	}
-
-	for len(q.values) >= q.bufSize {
-		q.fullCond.Wait()
-	}
+	if q.closed { return }
 
 	if _, ok := q.values[k]; !ok {
+		// The key has not been seen yet, push it to the
+		// queue.
+		for !q.closed && len(q.values) >= q.bufSize {
+			q.fullCond.Wait()
+		}
+		if q.closed { return }
 		q.queue.PushBack(k)
+		q.values[k] = v
+		q.nonEmptyCond.Signal()
+	} else {
+		// The key already exists, just update the value.
+		q.values[k] = v
 	}
-	q.values[k] = v
-
-	q.nonEmptyCond.Signal()
 }
 
 func (q *coalescingQueue[K, V]) Pop() (key K, item V, ok bool) {
@@ -75,6 +78,7 @@ func (q *coalescingQueue[K, V]) Pop() (key K, item V, ok bool) {
 	// If the queue is empty and closed we signal to consumer
 	// to stop.
 	if q.closed && q.queue.Front() == nil {
+		ok = false
 		return
 	}
 

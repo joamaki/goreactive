@@ -3,56 +3,65 @@
 
 package stream
 
-import "testing"
+import (
+	"sync"
+	"testing"
+	"time"
+)
 
 func TestCoalesingQueue(t *testing.T) {
-	q := newCoalescingQueue[int, string](16)
+	var wg sync.WaitGroup
+	q := newCoalescingQueue[int, string](3)
 
 	q.Push(1, "one")
 	q.Push(2, "two")
 	q.Push(1, "oneone")
 	q.Push(3, "three")
 
-	k, v, ok := q.Pop()
-	if !ok {
-		t.Fatalf("expected pop to succeed")
-	}
-	if v != "oneone" {
-		t.Fatalf("expected \"oneone\", but got %s", v)
-	}
-	if k != 1 {
-		t.Fatalf("expected key 1, got %d", k)
+	// Queue now full, push in the background
+	wg.Add(1)
+	fourBlocking := true
+	go func() {
+		q.Push(4, "four")
+		fourBlocking = false
+		wg.Done()
+	}()
+	// Check that last push is (likely) blocking
+	time.Sleep(time.Millisecond)
+	if !fourBlocking {
+		t.Fatalf("expected Push(4) to block")
 	}
 
-	k, v, ok = q.Pop()
-	if !ok {
-		t.Fatalf("expected pop to succeed")
+	expectPop := func(ek int, ev string) {
+		k, v, ok := q.Pop()
+		if !ok {
+			t.Fatalf("expected pop to succeed")
+		}
+		if k != ek {
+			t.Fatalf("expected key %d, got %d", ek, k)
+		}
+		if v != ev {
+			t.Fatalf("expected %q, but got %q", ev, v)
+		}
 	}
-	if v != "two" {
-		t.Fatalf("expected \"two\", but got %s", v)
-	}
-	if k != 2 {
-		t.Fatalf("expected key 1, got %d", k)
-	}
+	expectPop(1, "oneone")
+
+	// There should now be room in the queue, so wait
+	// for the background push to finish.
+	wg.Wait()
+
+	expectPop(2, "two")
+	expectPop(3, "three")
 
 	q.Close()
 
 	// We can still drain items after it's closed.
-	k, v, ok = q.Pop()
-	if !ok {
-		t.Fatalf("expected pop to succeed")
-	}
-	if v != "three" {
-		t.Fatalf("expected pop to return latest (three), but got %s", v)
-	}
-	if k != 3 {
-		t.Fatalf("expected key 3, got %d", k)
-	}
+	expectPop(4, "four")
 
 	// Pushing after it's closed should be no-op
 	q.Push(1, "oneoneone")
 
-	_, _, ok = q.Pop()
+	_, _, ok := q.Pop()
 	if ok {
 		t.Fatalf("expected q.Pop to return false after closing and draining")
 	}
