@@ -26,17 +26,21 @@ type Item[T k8sRuntime.Object] struct {
 	Object T
 }
 
-func Resource[T k8sRuntime.Object](ctx context.Context, resource string, namespace string, client rest.Interface) stream.Observable[[]Item[T]] {
-	// Number of unique items in queue before backpressure from subscriber
-	// TODO: configurable
-	const queueBufSize = 16
-
-	listWatcher := cache.NewListWatchFromClient(
+func ResourceFromClient[T k8sRuntime.Object](ctx context.Context, resource string, namespace string, client rest.Interface) stream.Observable[[]Item[T]] {
+	
+	lw := cache.NewListWatchFromClient(
 		client,
 		resource,
 		namespace,
 		fields.Everything(),
 	)
+	return Resource[T](ctx, lw) 
+}
+
+func Resource[T k8sRuntime.Object](ctx context.Context, lw cache.ListerWatcher) stream.Observable[[]Item[T]] {
+	// Number of unique items in queue before backpressure from subscriber
+	// TODO: configurable
+	const queueBufSize = 16
 
 	var (
 		mu     sync.RWMutex
@@ -54,7 +58,7 @@ func Resource[T k8sRuntime.Object](ctx context.Context, resource string, namespa
 	}
 
 	var empty T
-	indexer, informer := cache.NewIndexerInformer(listWatcher, empty, 0, cache.ResourceEventHandlerFuncs{
+	indexer, informer := cache.NewIndexerInformer(lw, empty, 0, cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {

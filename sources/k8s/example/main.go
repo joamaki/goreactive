@@ -61,21 +61,21 @@ func main() {
 		// Resource() returns []T with the first one being the initially
 		// synced object set, but we don't care about the distinctions here
 		// so we flatten it.
-		k8s.Resource[*v1.Pod](
+		k8s.ResourceFromClient[*v1.Pod](
 			ctx,
 			"pods",
 			"default",
 			client))
 
 	services := Flatten(
-		k8s.Resource[*v1.Service](
+		k8s.ResourceFromClient[*v1.Service](
 			ctx,
 			"services",
 			"default",
 			client))
 
 	endpoints := Flatten(
-		k8s.Resource[*v1.Endpoints](
+		k8s.ResourceFromClient[*v1.Endpoints](
 			ctx,
 			"endpoints",
 			"default",
