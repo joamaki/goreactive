@@ -5,6 +5,8 @@ package stream
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"time"
 )
 
@@ -54,6 +56,27 @@ func FromSlice[T any](items []T) Observable[T] {
 			for _, item := range items {
 				if ctx.Err() != nil {
 					return ctx.Err()
+				}
+				if err := next(item); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+}
+
+// FromAnySlice converts a slice of 'any' into an Observable of specified type.
+func FromAnySlice[T any](items []any) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			for _, anyItem := range items {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				item, ok := anyItem.(T)
+				if !ok {
+					var target T
+					return fmt.Errorf("FromAnySlice[%T]: %T not castable to target type", target, anyItem)
 				}
 				if err := next(item); err != nil {
 					return err
@@ -119,4 +142,32 @@ func Range(from, to int) Observable[int] {
 			}
 			return nil
 		})
+}
+
+// Deferred creates an observable that allows subscribing, but
+// waits for the real observable to be provided later.
+func Deferred[T any]() (src Observable[T], start func(Observable[T])) {
+	var (
+		mu sync.Mutex
+		cond = sync.NewCond(&mu)
+		realSrc Observable[T]
+	)
+
+	src = FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			mu.Lock()
+			defer mu.Unlock()
+			for realSrc == nil { cond.Wait() }
+			return realSrc.Observe(ctx, next)
+		})
+
+	start = func(src Observable[T]) {
+		mu.Lock()
+		defer mu.Unlock()
+		realSrc = src
+		cond.Signal()
+	}
+
+	return
+
 }

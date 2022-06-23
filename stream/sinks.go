@@ -59,6 +59,22 @@ func ToChannels[T any](ctx context.Context, src Observable[T]) (<-chan T, <-chan
 	return out, errs
 }
 
+// ToChannel converts an observable into an item of channels. Errors are delivered
+// to the supplied error channel.
+func ToChannel[T any](ctx context.Context, errs chan<- error, src Observable[T]) <-chan T {
+	out := make(chan T, 1)
+	go func() {
+		errs <- src.Observe(
+			ctx,
+			func(item T) error {
+				out <- item
+				return nil
+			})
+		close(out)
+	}()
+	return out
+}
+
 // Discard discards all items from 'src' and returns an error if any.
 func Discard[T any](ctx context.Context, src Observable[T]) error {
 	return src.Observe(ctx, func(item T) error { return nil })

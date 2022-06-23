@@ -174,6 +174,22 @@ items, err := ToSlice(ctx, src)
 // Converts the observable into items channel and errors channel.
 items, errs := ToChannels(ctx, src)
 
+// ToChannel[T any](ctx context.Context, errs <-chan error, src Observable[T]) <-chan T
+// Like ToChannels, but with a provided error channel. Useful when demuxing multiple
+// streams.
+items1 := ToChannel(ctx, errs, src1)
+items2 := ToChannel(ctx, errs, src2)
+for {
+	select {
+	case err := <-errs:
+		return err			
+	case item1 := <-items1:
+		// ...
+	case item2 := <-items2:
+		// ...
+	}
+}
+
 // Discard[T any](ctx context.Context, src Observable[T]) error
 err := Discard(ctx, src)
 ```
