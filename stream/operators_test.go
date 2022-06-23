@@ -207,7 +207,7 @@ func TestConcat(t *testing.T) {
 	assertSlice(t, "case 3", []int{}, res3)
 }
 
-func TestBroadcast(t *testing.T) {
+func TestMulticast(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -218,29 +218,18 @@ func TestBroadcast(t *testing.T) {
 	in := make(chan int)
 
 	// Create an unbuffered broadcast of 'in'
-	src := Broadcast(ctx, 0, FromChannel(in))
+	src, connect := Multicast(0, FromChannel(in))
 
 	subErrs := make(chan error, numSubs)
 	defer close(subErrs)
 
-	subReady := make(chan struct{}, numSubs)
-	defer close(subReady)
-
 	for i := 0; i < numSubs; i++ {
 		go func() {
 			items, errs := ToChannels(ctx, src)
-			signaled := false
 			index := 0
 			for {
 				select {
 				case item := <-items:
-					if item == 0 {
-						if !signaled {
-							subReady <- struct{}{}
-							signaled = true
-						}
-						continue
-					}
 					if item != expected[index] {
 						subErrs <- fmt.Errorf("%d != %d", item, expected[index])
 						return
@@ -255,19 +244,8 @@ func TestBroadcast(t *testing.T) {
 		}()
 	}
 
-	// Synchronize with workers by feeding 0s until all workers have acked.
-nextSub:
-	for i := 0; i < numSubs; i++ {
-		for {
-			select {
-			case in <- 0:
-			case <-subReady:
-				continue nextSub
-			default:
-				time.Sleep(time.Millisecond)
-			}
-		}
-	}
+	connErrs := make(chan error)
+	go func() { connErrs <- connect(ctx) }()
 
 	// Feed in the actual test data.
 	for _, i := range expected {
@@ -282,21 +260,26 @@ nextSub:
 			t.Fatalf("error: %s", err)
 		}
 	}
+
+	// Cancel the context and check that connect() terminates.
+	cancel()
+
+	err := <-connErrs
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("connect() error: %s", err)
+	}
 }
 
-func TestBroadcastCancel(t *testing.T) {
+func TestMulticastCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	numSubs := 10
 
-	src := Broadcast(ctx, 100, Range(0, 10000))
+	src, connect := Multicast(100, Range(0, 10000))
 
 	subErrs := make(chan error, numSubs)
 	defer close(subErrs)
-
-	subReady := make(chan struct{}, numSubs)
-	defer close(subReady)
 
 	for i := 0; i < numSubs; i++ {
 		go func() {
@@ -309,6 +292,10 @@ func TestBroadcastCancel(t *testing.T) {
 		}()
 	}
 
+	connErrs := make(chan error)
+	defer close(connErrs)
+	go func() { connErrs <- connect(ctx) }()
+
 	time.Sleep(10*time.Millisecond)
 	cancel()
 
@@ -318,6 +305,11 @@ func TestBroadcastCancel(t *testing.T) {
 		if err != nil && !errors.Is(err, context.Canceled) {
 			t.Fatalf("error: %s", err)
 		}
+	}
+
+	err := <-connErrs
+	if err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("connect() error: %s", err)
 	}
 }
 
@@ -674,12 +666,16 @@ func BenchmarkBroadcast(b *testing.B) {
 	b.ResetTimer()
 
 	count := 0
-	err := Broadcast(ctx, 16, FromSlice(s)).Observe(
+	mcast, connect := Multicast(16, FromSlice(s))
+
+	go connect(ctx)
+	err := mcast.Observe(
 		ctx,
 		func(item int) error {
 			count++
 			return nil
 		})
+
 
 	if err != nil {
 		b.Fatal(err)

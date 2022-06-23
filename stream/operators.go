@@ -175,16 +175,18 @@ func Concat[T any](srcs ...Observable[T]) Observable[T] {
 		})
 }
 
-// Broadcast creates a publish-subscribe observable that broadcasts items
+// Multicast creates a publish-subscribe observable that "multicasts" items
 // from the 'src' observable to subscribers.
-//
-// It immediately and only once observes the input and broadcasts the items
-// to downstream observers. If 'ctx' is cancelled all current observers are
-// completed, the input observable is cancelled.
 //
 // 'bufSize' is the number of items to buffer per observer before backpressure
 // towards the source.
-func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Observable[T] {
+//
+// Returns the wrapped observable and a function to connect observers to the
+// source observable.
+// 
+// Observers can subscribe both before and after the source has been connected,
+// but may miss events if subscribing after connect
+func Multicast[T any](bufSize int, src Observable[T]) (mcast Observable[T], connect func(context.Context) error) {
 	var (
 		mu           sync.RWMutex
 		subId        int
@@ -193,11 +195,9 @@ func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Obser
 	)
 
 	// Use a separate context for signalling to subscribers that the observer has finished.
-	bcastCtx, cancel := context.WithCancel(context.Background())
+	mcastCtx, cancel := context.WithCancel(context.Background())
 
-	// Spawn a worker that subscribes to the source and broadcasts the
-	// items to all subscribers.
-	go func() {
+	connect = func(ctx context.Context) error {
 		err := src.Observe(
 			ctx,
 			func(item T) error {
@@ -213,9 +213,10 @@ func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Obser
 		observeError = err
 		mu.Unlock()
 		cancel()
-	}()
+		return err
+	}
 
-	return FuncObservable[T](
+	mcast = FuncObservable[T](
 		func(subCtx context.Context, next func(T) error) error {
 			// Create a channel for this subscriber and add it to the
 			// map of subscribers.
@@ -232,7 +233,7 @@ func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Obser
 			var err error
 			for err == nil {
 				select {
-				case <-bcastCtx.Done():
+				case <-mcastCtx.Done():
 					// Broadcast context cancelled, so we know there's an error waiting.
 					mu.RLock()
 					err = observeError
@@ -272,6 +273,8 @@ func Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Obser
 
 			return err
 		})
+
+	return
 }
 
 // CoalesceByKey buffers updates from the input observable and keeps only the latest version of the

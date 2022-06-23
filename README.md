@@ -129,10 +129,14 @@ Reduce(Range(0, 10), 0, func(x, result int) int { return x + result })
 // Concat[T any](srcs ...Observable[T]) Observable[T]
 Concat(Range(0, 10), Range(10, 20)) == Range(0,20)
 
-// Broadcast[T any](ctx context.Context, bufSize int, src Observable[T]) Observable[T]
-// Creates an observable that broadcasts each element from the source to all observers
+// Multicast[T any](bufSize int, src Observable[T]) (Observable[T], func(context.Context) error)
+// Creates an observable that multicasts each element from the source to all observers
 // of the returned observable.
-Broadcast(ctx, 16, FromChannel(events))
+src, connect := Multicast(16, Range(0,20))
+src.Observe(...) // 0...20
+src.Observe(...) // 0...20
+connect(ctx)
+src.Observe(...) // 0...20? may miss items when subscribing after connect.
 
 // Merge[T any](srcs ...Observable[T]) Observable[T]
 Merge(Range(0, 10), Range(10, 20)) // values 0 to 19 in undefined order
