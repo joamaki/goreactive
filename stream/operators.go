@@ -158,6 +158,19 @@ func Reduce[T, Result any](src Observable[T], init Result, reduce func(Result, T
 		})
 }
 
+func Scan[In, Out any](src Observable[In], init Out, step func(Out, In) Out) Observable[Out] {
+	prev := init
+	return FuncObservable[Out](
+		func(ctx context.Context, next func(Out) error) error {
+			return src.Observe(
+				ctx,
+				func(x In) error {
+					prev = step(prev, x)
+					return next(prev)
+				})
+		})
+}
+
 // Concat takes one or more observable of the same type and emits the items from each of
 // them in order.
 func Concat[T any](srcs ...Observable[T]) Observable[T] {
@@ -517,7 +530,8 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 					if remaining > 0 {
 						next(item)
 						remaining--
-					} else {
+					}
+					if remaining == 0 {
 						cancel()
 					}
 					return nil

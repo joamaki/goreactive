@@ -504,6 +504,10 @@ func TestTakeSkip(t *testing.T) {
 	taken2, err := ToSlice(ctx, takenSrc)
 	assertNil(t, "ToSlice", err)
 	assertSlice(t, "skip 10, take 5", expected, taken2)
+
+	taken3, err := ToSlice(ctx, Take(5, Concat(Range(0, 5), Stuck[int]())))
+	assertNil(t, "ToSlice", err)
+	assertSlice(t, "take 5 of 5", []int{0,1,2,3,4}, taken3)
 }
 
 func TestRetry(t *testing.T) {
@@ -632,6 +636,17 @@ func TestOnNext(t *testing.T) {
 	if sum != 0+1+2+3+4 {
 		t.Fatal("unexpected sum")
 	}
+}
+
+func TestScan(t *testing.T) {
+	src := Scan(Range(1,4), 1, func(x, y int) int {
+		         return x * y
+	})
+	xs, err := ToSlice(context.TODO(), src)
+	assertNil(t, "Scan", err)
+	assertSlice(t, "scan",
+	            []int{1*1, 1*1*2, 1*1*2*3},
+	            xs)
 }
 
 //
