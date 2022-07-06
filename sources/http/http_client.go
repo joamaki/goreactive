@@ -82,6 +82,6 @@ func ResponseBody(in stream.Observable[*http.Response]) stream.Observable[[]byte
 		if err != nil {
 			return stream.Error[[]byte](err)
 		}
-		return stream.Single(body)
+		return stream.Just(body)
 	})
 }
