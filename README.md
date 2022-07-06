@@ -1,5 +1,4 @@
-Go Reactive
-===========
+# Go Reactive [![GoDoc][godoc-img]][godoc] ![Build Status][build-img]
 
 A reactive streams library for Go in the spirit of Reactive Extensions implemented
 with generic functions. The library was born as I wanted a Reactive Extensions library
@@ -10,8 +9,7 @@ The library is still in its infancy and thus sparse in terms of documentation an
 [RxGo](https://github.com/ReactiveX/RxGo) and from the [ReactiveX](http://reactivex.io/) do apply, so if you're
 new to reactive streams, you may want to browse these for an introduction to the concept.
 
-The stream package
-------------------
+## The stream package
 
 The stream package provides the Observable interface and the core functions.
 
@@ -42,8 +40,7 @@ Since Go's generics does not yet allow new type parameters in methods, all of th
 are implemented as top-level functions rather than methods in the Observable interface
 (e.g. as it is with RxGo and usual implementations).
 
-Getting started
----------------
+## Getting started
 
 As a first example, we'll implement a simple source `Observable` that emits a single integer:
 
@@ -90,8 +87,7 @@ func singleInt(x int) stream.Observable[int] {
 }
 ```
 
-Tour of the operators
----------------------
+## Tour of the operators
 
 [Sources](stream/sources.go) provide different ways of creating `Observable`s without
 implementing `Observe` by hand:
@@ -194,9 +190,12 @@ for {
 err := Discard(ctx, src)
 ```
 
-Additional sources
-------------------
+## Additional sources
 
 Included in this repository are also some additional sources:
 * [sources/http](sources/http/http.go) - A wrapper for the Go net/http client
 * [sources/k8s](sources/k8s/k8s.go) - A wrapper for a Kubernetes informer
+
+[godoc-img]: http://img.shields.io/badge/GoDoc-Reference-blue.svg
+[godoc]: https://godoc.org/github.com/joamaki/goreactive
+[build-img]: https://img.shields.io/github/workflow/status/joamaki/goreactive/main
