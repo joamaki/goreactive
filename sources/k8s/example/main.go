@@ -16,7 +16,6 @@ import (
 	"github.com/kr/pretty"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/joamaki/goreactive/sources/k8s"
@@ -52,34 +51,24 @@ func main() {
 		cancel()
 	}()
 
-	client, err := newK8sRESTClient(apiServerURL, kubeConfigPath)
+	client, err := newK8sClient(apiServerURL, kubeConfigPath)
 	if err != nil {
 		log.Fatalf("Failed to create k8s client: %s", err)
 	}
 
-	pods := Flatten(
-		// Resource() returns []T with the first one being the initially
-		// synced object set, but we don't care about the distinctions here
-		// so we flatten it.
-		k8s.ResourceFromClient[*v1.Pod](
+	pods :=  k8s.NewResourceFromListWatch[*v1.Pod, *v1.PodList](
 			ctx,
-			"pods",
-			"default",
-			client))
+			client.CoreV1().Pods("default"))
 
-	services := Flatten(
-		k8s.ResourceFromClient[*v1.Service](
+	services :=
+		k8s.NewResourceFromListWatch[*v1.Service, *v1.ServiceList](
 			ctx,
-			"services",
-			"default",
-			client))
+			client.CoreV1().Services("default"))
 
-	endpoints := Flatten(
-		k8s.ResourceFromClient[*v1.Endpoints](
+	endpoints :=
+		k8s.NewResourceFromListWatch[*v1.Endpoints, *v1.EndpointsList](
 			ctx,
-			"endpoints",
-			"default",
-			client))
+			client.CoreV1().Endpoints("default"))
 
 	podDiffer := newDiffer[*v1.Pod]()
 	serviceDiffer := newDiffer[*v1.Service]()
@@ -91,25 +80,49 @@ func main() {
 			Just("Waiting for updates...\n"),
 
 			Map(pods,
-				func(item k8s.Item[*v1.Pod]) string {
-					if item.Object == nil {
-						return fmt.Sprintf("pod %s deleted", item.Key)
-					}
-					return fmt.Sprintf("pod %s updated:\n%s\n", item.Key, podDiffer.diff(item.Key, item.Object))
+				func(ev k8s.Event[*v1.Pod]) string {
+					var out string
+					ev.Dispatch(
+						func(){
+							out = "pods synced"
+						},
+						func(key k8s.Key, pod *v1.Pod) {
+							out = fmt.Sprintf("pod %s updated:\n%s\n", key, podDiffer.diff(key, pod))
+						},
+						func(key k8s.Key) {
+							out = fmt.Sprintf("pod %s deleted", key)
+						})
+					return out
 				}),
 			Map(services,
-				func(item k8s.Item[*v1.Service]) string {
-					if item.Object == nil {
-						return fmt.Sprintf("service %s deleted", item.Key)
-					}
-					return fmt.Sprintf("service %s updated:\n%s\n", item.Key, serviceDiffer.diff(item.Key, item.Object))
+				func(ev k8s.Event[*v1.Service]) string {
+					var out string
+					ev.Dispatch(
+						func(){
+							out = "services synced"
+						},
+						func(key k8s.Key, service *v1.Service) {
+							out = fmt.Sprintf("service %s updated:\n%s\n", key, serviceDiffer.diff(key, service))
+						},
+						func(key k8s.Key) {
+							out = fmt.Sprintf("service %s deleted", key)
+						})
+					return out
 				}),
 			Map(endpoints,
-				func(item k8s.Item[*v1.Endpoints]) string {
-					if item.Object == nil {
-						return fmt.Sprintf("endpoints %s deleted", item.Key)
-					}
-					return fmt.Sprintf("endpoints %s updated:\n%s\n", item.Key, endpointsDiffer.diff(item.Key, item.Object))
+				func(ev k8s.Event[*v1.Endpoints]) string {
+					var out string
+					ev.Dispatch(
+						func(){
+							out = "endpoints synced"
+						},
+						func(key k8s.Key, endpoints *v1.Endpoints) {
+							out = fmt.Sprintf("endpoints %s updated:\n%s\n", key, endpointsDiffer.diff(key, endpoints))
+						},
+						func(key k8s.Key) {
+							out = fmt.Sprintf("endpoints %s deleted", key)
+						})
+					return out
 				}),
 		)
 
@@ -128,14 +141,14 @@ func main() {
 }
 
 type differ[T any] struct {
-	previous map[string]T
+	previous map[k8s.Key]T
 }
 
 func newDiffer[T any]() differ[T] {
-	return differ[T]{make(map[string]T)}
+	return differ[T]{make(map[k8s.Key]T)}
 }
 
-func (d differ[T]) diff(key string, obj T) string {
+func (d differ[T]) diff(key k8s.Key, obj T) string {
 	changeDesc := ""
 	if prev, ok := d.previous[key]; ok {
 		changes := pretty.Diff(prev, obj)
@@ -151,7 +164,7 @@ func (d differ[T]) diff(key string, obj T) string {
 
 }
 
-func newK8sRESTClient(url, kubeconfig string) (rest.Interface, error) {
+func newK8sClient(url, kubeconfig string) (kubernetes.Interface, error) {
 	config, err := clientcmd.BuildConfigFromFlags(url, kubeconfig)
 	if err != nil {
 		return nil, err
@@ -160,5 +173,5 @@ func newK8sRESTClient(url, kubeconfig string) (rest.Interface, error) {
 	if err != nil {
 		return nil, err
 	}
-	return clientset.CoreV1().RESTClient(), nil
+	return clientset, nil
 }
