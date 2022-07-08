@@ -11,6 +11,8 @@ import (
 	"sort"
 	"testing"
 	"time"
+	"sync/atomic"
+
 )
 
 func checkCancelled(t *testing.T, what string, src Observable[int]) {
@@ -218,23 +220,33 @@ func TestMulticast(t *testing.T) {
 	in := make(chan int)
 
 	// Create an unbuffered broadcast of 'in'
-	src, connect := Multicast(0, FromChannel(in))
+	src, connect := Multicast(MulticastParams{0, false}, FromChannel(in))
 
 	subErrs := make(chan error, numSubs)
 	defer close(subErrs)
+
+	numReady := int32(0)
 
 	for i := 0; i < numSubs; i++ {
 		go func() {
 			items, errs := ToChannels(ctx, src)
 			index := 0
+			ready := false
 			for {
 				select {
 				case item := <-items:
-					if item != expected[index] {
-						subErrs <- fmt.Errorf("%d != %d", item, expected[index])
-						return
+					if item == 0 {
+						if !ready {
+							atomic.AddInt32(&numReady, 1)
+							ready = true
+						}
+					} else {
+						if item != expected[index] {
+							subErrs <- fmt.Errorf("%d != %d", item, expected[index])
+							return
+						}
+						index++
 					}
-					index++
 
 				case err := <-errs:
 					subErrs <- err
@@ -247,6 +259,11 @@ func TestMulticast(t *testing.T) {
 	connErrs := make(chan error)
 	go func() { connErrs <- connect(ctx) }()
 
+	// Synchronize with the subscriptions
+	for atomic.LoadInt32(&numReady) != int32(numSubs) {
+		in <- 0
+	}
+
 	// Feed in the actual test data.
 	for _, i := range expected {
 		in <- i
@@ -257,7 +274,7 @@ func TestMulticast(t *testing.T) {
 	for i := 0; i < numSubs; i++ {
 		err := <-subErrs
 		if err != nil {
-			t.Fatalf("error: %s", err)
+			t.Errorf("error: %s", err)
 		}
 	}
 
@@ -276,7 +293,7 @@ func TestMulticastCancel(t *testing.T) {
 
 	numSubs := 10
 
-	src, connect := Multicast(100, Range(0, 10000))
+	src, connect := Multicast(MulticastParams{100, false}, Range(0, 10000))
 
 	subErrs := make(chan error, numSubs)
 	defer close(subErrs)
@@ -311,6 +328,33 @@ func TestMulticastCancel(t *testing.T) {
 	if err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("connect() error: %s", err)
 	}
+}
+
+func TestMulticastEmitLatest(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	expected := []int{0,1,2,3,4}
+	lastItem := expected[len(expected)-1]
+
+	src, connect := Multicast(MulticastParams{16, true}, Concat(FromSlice(expected), Stuck[int]()))
+	go connect(ctx)
+
+	// Subscribe first to wait for all items to be emitted
+	src.Observe(ctx, func(item int) error {
+		    if item == lastItem {
+			    return errors.New("stop")
+		    }
+		    return nil
+	})
+
+	// Then subscribe again to check that the latest item is seen.
+	x, err := First(ctx, src)
+	assertNil(t, "First", err)
+	if x != lastItem {
+		t.Fatalf("expected to see %d, got %d", lastItem, lastItem)
+	}
+
 }
 
 func TestMerge(t *testing.T) {
@@ -510,6 +554,28 @@ func TestTakeSkip(t *testing.T) {
 	assertSlice(t, "take 5 of 5", []int{0,1,2,3,4}, taken3)
 }
 
+func TestTakeWhile(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pred := func(x int) bool { return x < 5 }
+
+	xs, err := ToSlice(ctx, TakeWhile(pred, Range(0, 100)))
+	assertNil(t, "ToSlice+TakeWhile+Range", err)
+	assertSlice(t, "TakeWhile < 5", []int{0,1,2,3,4}, xs)
+
+	xs, err = ToSlice(ctx, TakeWhile(pred, Empty[int]()))
+	assertNil(t, "ToSlice+TakeWhile+Empty", err)
+	assertSlice(t, "TakeWhile of Empty", []int{}, xs)
+
+	cancel()
+	xs, err = ToSlice(ctx, TakeWhile(pred, Stuck[int]()))
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected Canceled, got %s", err)
+	}
+	assertSlice(t, "TakeWhile of cancelled Stuck", []int{}, xs)
+}
+
 func TestRetry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -681,7 +747,7 @@ func BenchmarkBroadcast(b *testing.B) {
 	b.ResetTimer()
 
 	count := 0
-	mcast, connect := Multicast(16, FromSlice(s))
+	mcast, connect := Multicast(DefaultMulticastParams, FromSlice(s))
 
 	go connect(ctx)
 	err := mcast.Observe(

@@ -188,23 +188,35 @@ func Concat[T any](srcs ...Observable[T]) Observable[T] {
 		})
 }
 
+type MulticastParams struct {
+	// BufferSize is the number of items to buffer per observer before backpressure
+	// towards the source.
+	BufferSize int
+
+	// EmitLatest if set will emit the latest seen item when neb observer
+	// subscribes.
+	EmitLatest bool
+}
+
+var DefaultMulticastParams = MulticastParams{16, false}
+
 // Multicast creates a publish-subscribe observable that "multicasts" items
 // from the 'src' observable to subscribers.
 //
-// 'bufSize' is the number of items to buffer per observer before backpressure
-// towards the source.
-//
 // Returns the wrapped observable and a function to connect observers to the
-// source observable.
+// source observable. Connect will block until source observable completes and
+// returns the error if any from the source observable.
 // 
 // Observers can subscribe both before and after the source has been connected,
-// but may miss events if subscribing after connect
-func Multicast[T any](bufSize int, src Observable[T]) (mcast Observable[T], connect func(context.Context) error) {
+// but may miss events if subscribing after connect.
+func Multicast[T any](params MulticastParams, src Observable[T]) (mcast Observable[T], connect func(context.Context) error) {
 	var (
-		mu           sync.RWMutex
+		mu           sync.Mutex
 		subId        int
 		subs         = make(map[int]chan T)
 		observeError error
+		latestValue  T
+		haveLatest   bool
 	)
 
 	// Use a separate context for signalling to subscribers that the observer has finished.
@@ -214,11 +226,15 @@ func Multicast[T any](bufSize int, src Observable[T]) (mcast Observable[T], conn
 		err := src.Observe(
 			ctx,
 			func(item T) error {
-				mu.RLock()
+				mu.Lock()
+				if params.EmitLatest {
+					latestValue = item
+					haveLatest = true
+				}
 				for _, sub := range subs {
 					sub <- item
 				}
-				mu.RUnlock()
+				mu.Unlock()
 				return nil
 			})
 
@@ -236,8 +252,13 @@ func Multicast[T any](bufSize int, src Observable[T]) (mcast Observable[T], conn
 			mu.Lock()
 			thisId := subId
 			subId++
-			items := make(chan T, bufSize)
+			items := make(chan T, params.BufferSize)
 			subs[thisId] = items
+
+			if params.EmitLatest && haveLatest {
+				next(latestValue)
+			}
+
 			mu.Unlock()
 
 			// Start feeding downstream from the items channel. Stop
@@ -248,9 +269,9 @@ func Multicast[T any](bufSize int, src Observable[T]) (mcast Observable[T], conn
 				select {
 				case <-mcastCtx.Done():
 					// Broadcast context cancelled, so we know there's an error waiting.
-					mu.RLock()
+					mu.Lock()
 					err = observeError
-					mu.RUnlock()
+					mu.Unlock()
 
 					// The worker has finished, so we can now safely close and drain any
 					// remaining items.
@@ -528,7 +549,9 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 			err := src.Observe(ctx,
 				func(item T) error {
 					if remaining > 0 {
-						next(item)
+						if err := next(item); err != nil {
+							return err
+						}
 						remaining--
 					}
 					if remaining == 0 {
@@ -545,6 +568,33 @@ func Take[T any](n int, src Observable[T]) Observable[T] {
 			return err
 		})
 }
+
+// TakeWhile takes items from the source until 'pred' returns false after which
+// the observable is completed.
+func TakeWhile[T any](pred func(T) bool, src Observable[T]) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			ctx, cancel := context.WithCancel(ctx)
+			done := false
+			err := src.Observe(ctx,
+				func(item T) error {
+					if !done && pred(item) {
+						if err := next(item); err != nil {
+							return err
+						}
+					} else {
+						done = true
+						cancel()
+					}
+					return nil
+				})
+			if done && errors.Is(err, context.Canceled) {
+				return nil
+			}
+			return err
+		})
+}
+
 
 // Skip skips the first 'n' items from the source.
 func Skip[T any](n int, src Observable[T]) Observable[T] {
