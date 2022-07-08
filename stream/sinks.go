@@ -11,7 +11,8 @@ import (
 // Sinks: operators that run an observable and send the output somewhere.
 //
 
-// First returns the first item from 'src' observable and then closes it.
+// First returns the first item from 'src' observable and then cancels
+// the subscription.
 func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
 	subCtx, cancel := context.WithCancel(ctx)
 	taken := false
@@ -25,7 +26,20 @@ func First[T any](ctx context.Context, src Observable[T]) (item T, err error) {
 			cancel()
 			return nil
 		})
+	if taken {
+		return item, nil
+	}
 	return
+}
+
+// Last returns the last item from 'src' observable.
+func Last[T any](ctx context.Context, src Observable[T]) (item T, err error) {
+	err = src.Observe(ctx,
+		func(x T) error {
+			item = x
+			return nil
+		})
+	return item, err
 }
 
 // ToSlice converts an Observable into a slice.
