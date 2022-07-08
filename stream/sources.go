@@ -108,6 +108,16 @@ func FromChannel[T any](in <-chan T) Observable[T] {
 		})
 }
 
+func FromFunction[T any](f func() T) Observable[T] {
+	return FuncObservable[T](
+		func(ctx context.Context, next func(T) error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return next(f())
+		})
+}
+
 // Interval emits an increasing counter value every 'interval' period.
 func Interval(interval time.Duration) Observable[int] {
 	return FuncObservable[int](
@@ -171,3 +181,70 @@ func Deferred[T any]() (src Observable[T], start func(Observable[T])) {
 	return
 
 }
+
+type observableValue[T any] struct {
+	mu sync.RWMutex
+	value T
+	updates chan<- T
+	closed bool
+}
+
+func (ov *observableValue[T]) Get() T {
+	ov.mu.RLock()
+	defer ov.mu.RUnlock()
+	if ov.closed { panic("ObservableValue is closed") }
+	return ov.value
+}
+
+func (ov *observableValue[T]) Replace(new T) {
+	ov.mu.Lock()
+	defer ov.mu.Unlock()
+	if ov.closed { panic("ObservableValue is closed") }
+	ov.value = new
+	ov.updates <- ov.value
+}
+
+func (ov *observableValue[T]) Update(f func(*T)) {
+	ov.mu.Lock()
+	defer ov.mu.Unlock()
+	if ov.closed { panic("ObservableValue is closed") }
+	f(&ov.value)
+	ov.updates <- ov.value
+}
+
+func (ov *observableValue[T]) Close() {
+	ov.mu.Lock()
+	defer ov.mu.Unlock()
+	ov.closed = true
+	close(ov.updates)
+}
+
+type ObservableValue[T any] interface {
+	// Get retrieves the latest value
+	Get() T
+
+	// Replace replaces the value. Observers of
+	// the value are notified of the new value.
+	Replace(new T)
+
+	// Update updates the value with a function that modifies
+	// it. Observers of the value are notified of the new value.
+	Update(f func(*T))
+
+	// Close the value. Any observers to this value are completed.
+	Close()
+}
+
+func NewObservableValue[T any](ctx context.Context, init T) (ObservableValue[T], Observable[T], error) {
+	updates := make(chan T)
+
+	// Wrap the updates channel into a multicast source that emits
+	// the last seen value when subscribing.
+	src, connect := Multicast(
+		MulticastParams{BufferSize: 16, EmitLatest: true},
+		FromChannel(updates))
+	go connect(ctx)
+	ov := &observableValue[T]{value: init, updates: updates}
+	return ov, src, nil
+}
+

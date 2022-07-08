@@ -159,6 +159,72 @@ func TestRangeTake(t *testing.T) {
 	}
 }
 
+type myValue struct {
+	foo int
+}
+
+func TestObservableValue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ov, src, err := NewObservableValue(ctx, myValue{0})
+	assertNil(t, "NewObservableValue", err)
+
+	// Start observing changes to the value in the background
+	updates := make(chan myValue, 100)
+	go func() {
+		src.Observe(ctx,
+			func(item myValue) error {
+				updates <- item
+				if item.foo == 99 {
+					return errors.New("stop")
+				}
+				return nil
+			})
+		close(updates)
+	}()
+
+	// Synchronize to make the observing in background has finished
+	// subscribing, so that updates are not missed.
+	ov.Update(func(v *myValue) { v.foo = -1 })
+	<-updates
+
+	// Update the value
+	for i := 0; i < 50; i++ {
+		ov.Update(func(v *myValue) { v.foo = i })
+	}
+
+	// Verify that subscribing now will see the last value.
+	// We check with TakeWhile as we may end up sometimes
+	// subscribing too early and see more values.
+	// TODO: Consider fixing this race. Happens as `Update` sends
+	// the latest item to a channel, but it doesn't wait for `Multicast`
+	// to process the item. This really should just impact testing.
+	_, err = Last(ctx, TakeWhile(
+		func(v myValue) bool { return v.foo < 49 },
+		src))
+	assertNil(t, "Last+TakeUntil", err)
+
+	// Do the rest of the updates, but with Replace.
+	for i := 50; i < 100; i++ {
+		ov.Replace(myValue{i})
+	}
+
+	i := 0
+	for v := range updates {
+		if v.foo != i {
+			t.Fatalf("expected to see an update with foo = %d, got %d", i, v.foo)
+		}
+		i++
+	}
+
+	// Close the value and verify that subscribing to it completes immediately.
+	ov.Close()
+
+	err = src.Observe(ctx, func(item myValue) error { return nil })
+	assertNil(t, "Observe after Close", err)
+}
+
 //
 // Benchmarks
 //
