@@ -182,34 +182,12 @@ func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple
 			subCtx, cancel := context.WithCancel(ctx)
 
 			errs := make(chan error, 2)
+			defer close(errs)
+
 			v1s := ToChannel(subCtx, errs, src1)
 			v2s := ToChannel(subCtx, errs, src2)
 
-			var err error
-
-			// Wait for error or cancellation of parent context in the background.
-			go func() {
-				nsubs := 2
-				outer: for ; nsubs > 0; nsubs-- {
-					select {
-					case <-ctx.Done():
-						err = ctx.Err()
-						break outer
-					case maybeErr := <-errs:
-						if maybeErr != nil {
-							err = maybeErr
-							break outer
-						}
-					}
-				}
-				// Cancel the sub-context and drain the errors.
-				cancel()
-				for ; nsubs > 0; nsubs-- {
-					<-errs
-				}
-				close(errs)
-			}()
-
+			var errOut error
 			for {
 				v1, ok := <-v1s
 				if !ok {
@@ -221,12 +199,35 @@ func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple
 				}
 
 				if err := next(Tuple2[V1,V2]{V1: v1, V2: v2}); err != nil {
-					cancel()
-					return err
+					errOut = err
+					break
 				}
 			}
 
-			return err
+			cancel()
+
+			// Drain
+			for range v1s {}
+			for range v2s {}
+
+			if err := <-errs; err != nil && errOut == nil {
+				errOut = err
+			}
+			if err := <-errs; err != nil && errOut == nil {
+				errOut = err
+			}
+
+			// Only care about canceled if parent was canceled.
+			if errors.Is(errOut, context.Canceled) {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					return nil
+				}
+			}
+
+			return errOut
 
 		})
 }
