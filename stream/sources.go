@@ -192,16 +192,7 @@ type observableValue[T any] struct {
 func (ov *observableValue[T]) Get() T {
 	ov.mu.RLock()
 	defer ov.mu.RUnlock()
-	if ov.closed { panic("ObservableValue is closed") }
 	return ov.value
-}
-
-func (ov *observableValue[T]) Replace(new T) {
-	ov.mu.Lock()
-	defer ov.mu.Unlock()
-	if ov.closed { panic("ObservableValue is closed") }
-	ov.value = new
-	ov.updates <- ov.value
 }
 
 func (ov *observableValue[T]) Update(f func(*T)) {
@@ -223,12 +214,9 @@ type ObservableValue[T any] interface {
 	// Get retrieves the latest value
 	Get() T
 
-	// Replace replaces the value. Observers of
-	// the value are notified of the new value.
-	Replace(new T)
-
 	// Update updates the value with a function that modifies
 	// it. Observers of the value are notified of the new value.
+	// Panics if called after Close().
 	Update(f func(*T))
 
 	// Close the value. Any observers to this value are completed.

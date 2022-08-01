@@ -205,9 +205,9 @@ func TestObservableValue(t *testing.T) {
 		src))
 	assertNil(t, "Last+TakeUntil", err)
 
-	// Do the rest of the updates, but with Replace.
+	// Do the rest of the updates.
 	for i := 50; i < 100; i++ {
-		ov.Replace(myValue{i})
+		ov.Update(func(v *myValue) { v.foo = i })
 	}
 
 	i := 0
