@@ -139,7 +139,8 @@ func Filter[T any](src Observable[T], filter func(T) bool) Observable[T] {
 }
 
 // Reduce takes an initial state, and a function 'reduce' that is called on each element
-// along with a state and returns an observable with a single result state.
+// along with a state and returns an observable with a single result state produced
+// by the last call to 'reduce'.
 func Reduce[T, Result any](src Observable[T], init Result, reduce func(Result, T) Result) Observable[Result] {
 	result := init
 	return FuncObservable[Result](
@@ -158,6 +159,9 @@ func Reduce[T, Result any](src Observable[T], init Result, reduce func(Result, T
 		})
 }
 
+// Scan takes an initial state and a step function that is called on each element with the
+// previous state and returns an observable of the states returned by the step function.
+// E.g. Scan is like Reduce that emits the intermediate states.
 func Scan[In, Out any](src Observable[In], init Out, step func(Out, In) Out) Observable[Out] {
 	prev := init
 	return FuncObservable[Out](
@@ -168,6 +172,62 @@ func Scan[In, Out any](src Observable[In], init Out, step func(Out, In) Out) Obs
 					prev = step(prev, x)
 					return next(prev)
 				})
+		})
+}
+
+// Zip2 takes two observables and merges them into an observable of pairs
+func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple2[V1,V2]] {
+	return FuncObservable[Tuple2[V1, V2]](
+		func(ctx context.Context, next func(Tuple2[V1,V2]) error) error {
+			subCtx, cancel := context.WithCancel(ctx)
+
+			errs := make(chan error, 2)
+			v1s := ToChannel(subCtx, errs, src1)
+			v2s := ToChannel(subCtx, errs, src2)
+
+			var err error
+
+			// Wait for error or cancellation of parent context in the background.
+			go func() {
+				nsubs := 2
+				outer: for ; nsubs > 0; nsubs-- {
+					select {
+					case <-ctx.Done():
+						err = ctx.Err()
+						break outer
+					case maybeErr := <-errs:
+						if maybeErr != nil {
+							err = maybeErr
+							break outer
+						}
+					}
+				}
+				// Cancel the sub-context and drain the errors.
+				cancel()
+				for ; nsubs > 0; nsubs-- {
+					<-errs
+				}
+				close(errs)
+			}()
+
+			for {
+				v1, ok := <-v1s
+				if !ok {
+					break
+				}
+				v2, ok := <-v2s
+				if !ok {
+					break
+				}
+
+				if err := next(Tuple2[V1,V2]{V1: v1, V2: v2}); err != nil {
+					cancel()
+					return err
+				}
+			}
+
+			return err
+
 		})
 }
 

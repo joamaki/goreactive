@@ -107,6 +107,57 @@ func TestReduce(t *testing.T) {
 	checkCancelled(t, "case 3", Reduce(Range(0, 100), 0, sum))
 }
 
+func TestScan(t *testing.T) {
+	src := Scan(Range(1,4), 1, func(x, y int) int {
+		         return x * y
+	})
+	xs, err := ToSlice(context.TODO(), src)
+	assertNil(t, "Scan", err)
+	assertSlice(t, "scan",
+	            []int{1*1, 1*1*2, 1*1*2*3},
+	            xs)
+}
+
+func TestZip2(t *testing.T) {
+	// 1. Non-empty sources
+	src := Zip2(Range(0,5), Range(5, 10))
+	xs, err := ToSlice(context.TODO(), src)
+	assertNil(t, "case 1", err)
+	assertSlice(t, "case 1",
+	            []Tuple2[int,int]{
+			{0,5},
+			{1,6},
+			{2,7},
+			{3,8},
+			{4,9},
+	            },
+		    xs)
+
+        // 2. One shorter than the other
+	src = Zip2(Range(0,5), Just(5))
+	xs, err = ToSlice(context.TODO(), src)
+	assertNil(t, "case 2", err)
+	assertSlice(t, "case 2",
+	            []Tuple2[int,int]{
+			{0,5},
+	            },
+		    xs)
+
+	// 3. One empty
+	src = Zip2(Range(0,5), Empty[int]())
+	xs, err = ToSlice(context.TODO(), src)
+	assertNil(t, "case 3", err)
+	assertSlice(t, "case 3",
+	            []Tuple2[int,int]{},
+		    xs)
+
+	// 4. Cancelled context
+	checkCancelled(t, "case 4",
+		Map(Zip2(Range(0,5), Stuck[int]()), func(t Tuple2[int,int]) int { return t.V1 }),
+	)
+}
+
+
 func TestFlatMap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -702,17 +753,6 @@ func TestOnNext(t *testing.T) {
 	if sum != 0+1+2+3+4 {
 		t.Fatal("unexpected sum")
 	}
-}
-
-func TestScan(t *testing.T) {
-	src := Scan(Range(1,4), 1, func(x, y int) int {
-		         return x * y
-	})
-	xs, err := ToSlice(context.TODO(), src)
-	assertNil(t, "Scan", err)
-	assertSlice(t, "scan",
-	            []int{1*1, 1*1*2, 1*1*2*3},
-	            xs)
 }
 
 //
