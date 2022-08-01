@@ -453,7 +453,7 @@ func TestCoalesceByKey(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	values := []int{1,2,3,1,1,3}
+	values := []int{1,2,3,2,3,4}
 
 	toKey := func(v int) int {
 		return v
@@ -465,7 +465,7 @@ func TestCoalesceByKey(t *testing.T) {
 	out, err := ToSlice(ctx, Delay(buffered, time.Millisecond))
 	assertNil(t, "CoalesceByKey", err)
 
-	expected := []int{1, 2, 3}
+	expected := []int{1, 2, 3, 4}
 	assertSlice(t, "CoalesceByKey", expected, out)
 }
 
