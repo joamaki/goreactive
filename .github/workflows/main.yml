@@ -23,6 +23,9 @@ jobs:
       - name: test
         run: |
           make test
+      - name: test-race
+        run: |
+          make test-race
       - name: bench
         run: |
           make bench
