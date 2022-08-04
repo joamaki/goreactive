@@ -6,8 +6,39 @@ package stream
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 )
+
+func collect[T any](src Observable[T], to *[]T, err *error, wg *sync.WaitGroup) {
+	*to, *err = ToSlice(context.Background(), src)
+	wg.Done()
+}
+
+func TestDeferred(t *testing.T) {
+	src, start := Deferred[int]()
+
+	// Subscribe twice to the deferred source 
+	var out1, out2 []int
+	var err1, err2 error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go collect(src, &out1, &err1, &wg)
+	go collect(src, &out2, &err2, &wg)
+
+	// Yield for millisecond to wait for the subscriptions to hit
+	time.Sleep(time.Millisecond)
+	expected := []int{0,1,2,3,4}
+	start(FromSlice(expected))
+
+	wg.Wait()
+
+	assertNil(t, "err1", err1)
+	assertNil(t, "err2", err2)
+	assertSlice(t, "out1", out1, expected)
+	assertSlice(t, "out2", out2, expected)
+}
 
 func TestJustFirstStuck(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

@@ -175,7 +175,7 @@ func Deferred[T any]() (src Observable[T], start func(Observable[T])) {
 		mu.Lock()
 		defer mu.Unlock()
 		realSrc = src
-		cond.Signal()
+		cond.Broadcast()
 	}
 
 	return
