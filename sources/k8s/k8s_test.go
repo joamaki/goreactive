@@ -5,6 +5,7 @@ package k8s
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,7 +17,7 @@ import (
 
 var node = &corev1.Node{
 	ObjectMeta: metav1.ObjectMeta{
-		Name:      "hello",
+		Name: "hello",
 	},
 	Status: corev1.NodeStatus{
 		Phase: "funky",
@@ -29,7 +30,11 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 	cs := fake.NewSimpleClientset(node)
 
 	nodes := cs.CoreV1().Nodes()
-	events := NewResourceFromListWatch[*corev1.Node, *corev1.NodeList](ctx, nodes)
+	events, run := NewResourceFromListWatch[*corev1.Node, *corev1.NodeList](ctx, nodes)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	defer wg.Wait()
+	go func() { run(); wg.Done() }()
 
 	xs, errs := stream.ToChannels(ctx, stream.Take(4, events))
 
@@ -52,7 +57,7 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 
 	// Second should be a sync.
 	(<-xs).Dispatch(
-		func() { },
+		func() {},
 		func(key Key, node *corev1.Node) {
 			t.Fatalf("unexpected update of %s", key)
 		},
@@ -103,6 +108,5 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got %s", err)
 	}
-
 
 }

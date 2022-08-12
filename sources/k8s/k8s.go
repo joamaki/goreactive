@@ -68,7 +68,8 @@ type Event[T k8sRuntime.Object] interface {
 
 // SyncEvent is emitted when the store has completed the initial synchronization
 // with the cluster.
-type SyncEvent[T k8sRuntime.Object] struct {}
+type SyncEvent[T k8sRuntime.Object] struct{}
+
 func (*SyncEvent[T]) isEvent(T) {}
 func (*SyncEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete func(Key)) {
 	onSync()
@@ -76,9 +77,10 @@ func (*SyncEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete fun
 
 // UpdateEvent is emitted when an object has been added or updated
 type UpdateEvent[T k8sRuntime.Object] struct {
-	Key Key 
+	Key    Key
 	Object T
 }
+
 func (*UpdateEvent[T]) isEvent(T) {}
 func (ev *UpdateEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete func(Key)) {
 	onUpdate(ev.Key, ev.Object)
@@ -88,6 +90,7 @@ func (ev *UpdateEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelet
 type DeleteEvent[T k8sRuntime.Object] struct {
 	Key Key
 }
+
 func (*DeleteEvent[T]) isEvent(T) {}
 func (ev *DeleteEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete func(Key)) {
 	onDelete(ev.Key)
@@ -96,11 +99,12 @@ func (ev *DeleteEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelet
 // NewResource creates a stream of events from a ListerWatcher.
 // The initial set of objects is emitted first as UpdateEvents, followed by a SyncEvent, after
 // which updates follow.
-func NewResource[T k8sRuntime.Object](ctx context.Context, lw cache.ListerWatcher) stream.Observable[Event[T]] {
+// Returns the observable and the function to run the resource.
+func NewResource[T k8sRuntime.Object](rootCtx context.Context, lw cache.ListerWatcher) (src stream.Observable[Event[T]], run func()) {
 	var (
-		mu     sync.RWMutex
-		subId  int
-		queues = make(map[int]workqueue.RateLimitingInterface)
+		mu            sync.RWMutex
+		subId         int
+		queues        = make(map[int]workqueue.RateLimitingInterface)
 		exampleObject T
 	)
 
@@ -114,16 +118,16 @@ func NewResource[T k8sRuntime.Object](ctx context.Context, lw cache.ListerWatche
 	}
 
 	handlerFuncs :=
-	    cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) { push(NewKey(obj)) },
-		UpdateFunc: func(old interface{}, new interface{}) { push(NewKey(new)) },
-		DeleteFunc: func(obj interface{}) { push(NewKey(obj)) },
-	    }
+		cache.ResourceEventHandlerFuncs{
+			AddFunc:    func(obj interface{}) { push(NewKey(obj)) },
+			UpdateFunc: func(old interface{}, new interface{}) { push(NewKey(new)) },
+			DeleteFunc: func(obj interface{}) { push(NewKey(obj)) },
+		}
 
 	store, informer := cache.NewInformer(lw, exampleObject, 0, handlerFuncs)
-	go informer.Run(ctx.Done())
 
-	return stream.FuncObservable[Event[T]](
+	run = func() { informer.Run(rootCtx.Done()) }
+	src = stream.FuncObservable[Event[T]](
 		func(subCtx context.Context, next func(Event[T]) error) error {
 			// Subscribe to changes first so they would not be missed.
 			mu.Lock()
@@ -133,7 +137,7 @@ func NewResource[T k8sRuntime.Object](ctx context.Context, lw cache.ListerWatche
 			mu.Unlock()
 
 			// Wait for cache to be synced before emitting the initial set.
-			if !cache.WaitForCacheSync(ctx.Done(), informer.HasSynced) {
+			if !cache.WaitForCacheSync(rootCtx.Done(), informer.HasSynced) {
 				return errors.New("Resource is shutting down")
 			}
 
@@ -196,14 +200,14 @@ func NewResource[T k8sRuntime.Object](ctx context.Context, lw cache.ListerWatche
 			for !done {
 				select {
 				case err = <-errs:
-					done = true 
-				case <-ctx.Done():
+					done = true
+				case <-rootCtx.Done():
 					// Upstream cancelled
-					err = ctx.Err()
+					err = rootCtx.Err()
 					done = true
 				case <-subCtx.Done():
 					// Subscriber cancelled
-					err = ctx.Err()
+					err = subCtx.Err()
 					done = true
 				case ev := <-events:
 					err = next(ev)
@@ -217,15 +221,18 @@ func NewResource[T k8sRuntime.Object](ctx context.Context, lw cache.ListerWatche
 			// Cancel and drain
 			go queue.ShutDownWithDrain()
 			cancel()
-			for range events {}
+			for range events {
+			}
 
 			return err
 
 		})
+
+	return
 }
 
 // NewResourceFromListWatch creates a stream of events from the typed client, e.g. (kubernetes.Interface).Pods() etc.
-func NewResourceFromListWatch[ObjT k8sRuntime.Object, ListT k8sRuntime.Object](ctx context.Context, lw TypedListerWatcher[ListT]) stream.Observable[Event[ObjT]] {
+func NewResourceFromListWatch[ObjT k8sRuntime.Object, ListT k8sRuntime.Object](ctx context.Context, lw TypedListerWatcher[ListT]) (src stream.Observable[Event[ObjT]], run func()) {
 	return NewResource[ObjT](ctx, listerWatcherAdapter[ListT]{ctx, lw})
 }
 
@@ -236,14 +243,14 @@ func NewResourceFromClient[T k8sRuntime.Object](
 	resource string,
 	namespace string,
 	client rest.Interface,
-) stream.Observable[Event[T]] {
+) (src stream.Observable[Event[T]], run func()) {
 	lw := cache.NewListWatchFromClient(
 		client,
 		resource,
 		namespace,
 		fields.Everything(),
 	)
-	return NewResource[T](ctx, lw) 
+	return NewResource[T](ctx, lw)
 }
 
 func resourceVersion(obj any) (version string) {
@@ -264,7 +271,7 @@ type TypedListerWatcher[ListT k8sRuntime.Object] interface {
 
 // listerWatcherAdapter implements cache.ListerWatcher in terms of a typed List and Watch methods.
 type listerWatcherAdapter[ListT k8sRuntime.Object] struct {
-	ctx context.Context
+	ctx   context.Context
 	typed TypedListerWatcher[ListT]
 }
 
@@ -275,4 +282,3 @@ func (tlw listerWatcherAdapter[T]) Watch(options metav1.ListOptions) (watch.Inte
 func (tlw listerWatcherAdapter[T]) List(options metav1.ListOptions) (runtime.Object, error) {
 	return tlw.typed.List(tlw.ctx, options)
 }
-
