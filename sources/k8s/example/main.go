@@ -56,19 +56,23 @@ func main() {
 		log.Fatalf("Failed to create k8s client: %s", err)
 	}
 
-	pods :=  k8s.NewResourceFromListWatch[*v1.Pod, *v1.PodList](
-			ctx,
-			client.CoreV1().Pods("default"))
+	var run func()
+	pods, run := k8s.NewResourceFromListWatch[*v1.Pod, *v1.PodList](
+		ctx,
+		client.CoreV1().Pods("default"))
+	go run()
 
-	services :=
+	services, run :=
 		k8s.NewResourceFromListWatch[*v1.Service, *v1.ServiceList](
 			ctx,
 			client.CoreV1().Services("default"))
+	go run()
 
-	endpoints :=
+	endpoints, run :=
 		k8s.NewResourceFromListWatch[*v1.Endpoints, *v1.EndpointsList](
 			ctx,
 			client.CoreV1().Endpoints("default"))
+	go run()
 
 	podDiffer := newDiffer[*v1.Pod]()
 	serviceDiffer := newDiffer[*v1.Service]()
@@ -83,7 +87,7 @@ func main() {
 				func(ev k8s.Event[*v1.Pod]) string {
 					var out string
 					ev.Dispatch(
-						func(){
+						func(_ k8s.Store[*v1.Pod]) {
 							out = "pods synced"
 						},
 						func(key k8s.Key, pod *v1.Pod) {
@@ -98,7 +102,7 @@ func main() {
 				func(ev k8s.Event[*v1.Service]) string {
 					var out string
 					ev.Dispatch(
-						func(){
+						func(_ k8s.Store[*v1.Service]) {
 							out = "services synced"
 						},
 						func(key k8s.Key, service *v1.Service) {
@@ -113,7 +117,7 @@ func main() {
 				func(ev k8s.Event[*v1.Endpoints]) string {
 					var out string
 					ev.Dispatch(
-						func(){
+						func(_ k8s.Store[*v1.Endpoints]) {
 							out = "endpoints synced"
 						},
 						func(key k8s.Key, endpoints *v1.Endpoints) {
