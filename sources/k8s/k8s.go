@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -60,7 +61,7 @@ type Event[T k8sRuntime.Object] interface {
 	// Dispatch dispatches to the right event handler. Prefer this over
 	// type switch on event.
 	Dispatch(
-		onSync func(),
+		onSync func(Store[T]),
 		onUpdate func(Key, T),
 		onDelete func(Key),
 	)
@@ -68,11 +69,15 @@ type Event[T k8sRuntime.Object] interface {
 
 // SyncEvent is emitted when the store has completed the initial synchronization
 // with the cluster.
-type SyncEvent[T k8sRuntime.Object] struct{}
+type SyncEvent[T k8sRuntime.Object] struct {
+	Store Store[T]
+}
+
+var _ Event[*corev1.Node] = &SyncEvent[*corev1.Node]{}
 
 func (*SyncEvent[T]) isEvent(T) {}
-func (*SyncEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete func(Key)) {
-	onSync()
+func (s *SyncEvent[T]) Dispatch(onSync func(store Store[T]), onUpdate func(Key, T), onDelete func(Key)) {
+	onSync(s.Store)
 }
 
 // UpdateEvent is emitted when an object has been added or updated
@@ -81,8 +86,10 @@ type UpdateEvent[T k8sRuntime.Object] struct {
 	Object T
 }
 
+var _ Event[*corev1.Node] = &UpdateEvent[*corev1.Node]{}
+
 func (*UpdateEvent[T]) isEvent(T) {}
-func (ev *UpdateEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete func(Key)) {
+func (ev *UpdateEvent[T]) Dispatch(onSync func(Store[T]), onUpdate func(Key, T), onDelete func(Key)) {
 	onUpdate(ev.Key, ev.Object)
 }
 
@@ -91,15 +98,64 @@ type DeleteEvent[T k8sRuntime.Object] struct {
 	Key Key
 }
 
+var _ Event[*corev1.Node] = &DeleteEvent[*corev1.Node]{}
+
 func (*DeleteEvent[T]) isEvent(T) {}
-func (ev *DeleteEvent[T]) Dispatch(onSync func(), onUpdate func(Key, T), onDelete func(Key)) {
+func (ev *DeleteEvent[T]) Dispatch(onSync func(Store[T]), onUpdate func(Key, T), onDelete func(Key)) {
 	onDelete(ev.Key)
+}
+
+// Store is a read-only typed wrapper for cache.Store.
+type Store[T k8sRuntime.Object] interface {
+	List() []T
+	ListKeys() []string
+	Get(obj T) (item T, exists bool, err error)
+	GetByKey(key string) (item T, exists bool, err error)
+}
+
+type typedStore[T k8sRuntime.Object] struct {
+	store cache.Store
+}
+
+var _ Store[*corev1.Node] = &typedStore[*corev1.Node]{}
+
+func (s *typedStore[T]) List() []T {
+	items := s.store.List()
+	result := make([]T, len(items))
+	for i := range items {
+		result[i] = items[i].(T)
+	}
+	return result
+}
+
+func (s *typedStore[T]) ListKeys() []string {
+	return s.store.ListKeys()
+}
+
+func (s *typedStore[T]) Get(obj T) (item T, exists bool, err error) {
+	var key string
+	key, err = cache.MetaNamespaceKeyFunc(obj)
+	if err != nil {
+		return
+	}
+	var itemAny any
+	itemAny, exists, err = s.store.GetByKey(key)
+	item = itemAny.(T)
+	return
+}
+
+func (s *typedStore[T]) GetByKey(key string) (item T, exists bool, err error) {
+	var itemAny any
+	itemAny, exists, err = s.store.GetByKey(key)
+	item = itemAny.(T)
+	return
 }
 
 // NewResource creates a stream of events from a ListerWatcher.
 // The initial set of objects is emitted first as UpdateEvents, followed by a SyncEvent, after
-// which updates follow.
-// Returns the observable and the function to run the resource.
+// which updates follow. SyncEvent contains a read-only handle onto the underlying store.
+//
+// Returns an observable for the stream of events and the function to run the resource.
 func NewResource[T k8sRuntime.Object](rootCtx context.Context, lw cache.ListerWatcher) (src stream.Observable[Event[T]], run func()) {
 	var (
 		mu            sync.RWMutex
@@ -148,7 +204,7 @@ func NewResource[T k8sRuntime.Object](rootCtx context.Context, lw cache.ListerWa
 				next(&UpdateEvent[T]{key, obj.(T)})
 				initialVersions[key] = resourceVersion(obj)
 			}
-			next(&SyncEvent[T]{})
+			next(&SyncEvent[T]{&typedStore[T]{store}})
 
 			subCtx, cancel := context.WithCancel(subCtx)
 			errs := make(chan error, 1)

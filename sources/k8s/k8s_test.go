@@ -24,6 +24,41 @@ var node = &corev1.Node{
 	},
 }
 
+func testStore(t *testing.T, store Store[*corev1.Node]) {
+	var (
+		item   *corev1.Node
+		exists bool
+		err    error
+	)
+
+	check := func() {
+		if err != nil {
+			t.Fatalf("unexpected error from GetByKey: %s", err)
+		}
+		if !exists {
+			t.Fatalf("GetByKey returned exists=false")
+		}
+		if item.Name != node.ObjectMeta.Name {
+			t.Fatalf("expected item returned by GetByKey to have name %s, got %s",
+				node.ObjectMeta.Name, item.ObjectMeta.Name)
+		}
+	}
+	item, exists, err = store.GetByKey(node.ObjectMeta.Name)
+	check()
+	item, exists, err = store.Get(node)
+	check()
+
+	keys := store.ListKeys()
+	if len(keys) != 1 && keys[0] != "hello" {
+		t.Fatalf("unexpected keys: %#v", keys)
+	}
+
+	items := store.List()
+	if len(items) != 1 && items[0].ObjectMeta.Name != "hello" {
+		t.Fatalf("unexpected items: %#v", items)
+	}
+}
+
 func TestK8sResourceWithFakeClient(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -40,7 +75,7 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 
 	// First event should be the node (initial set)
 	(<-xs).Dispatch(
-		func() { t.Fatal("unexpected sync") },
+		func(_ Store[*corev1.Node]) { t.Fatal("unexpected sync") },
 		func(key Key, node *corev1.Node) {
 			if key.String() != "hello" {
 				t.Fatalf("unexpected update of %s", key)
@@ -57,7 +92,8 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 
 	// Second should be a sync.
 	(<-xs).Dispatch(
-		func() {},
+		func(s Store[*corev1.Node]) {
+		},
 		func(key Key, node *corev1.Node) {
 			t.Fatalf("unexpected update of %s", key)
 		},
@@ -72,7 +108,7 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 		corev1.SchemeGroupVersion.WithResource("nodes"),
 		node, "")
 	(<-xs).Dispatch(
-		func() { t.Fatalf("unexpected sync") },
+		func(_ Store[*corev1.Node]) { t.Fatalf("unexpected sync") },
 		func(key Key, node *corev1.Node) {
 			if key.String() != "hello" {
 				t.Fatalf("unexpected update of %s", key)
@@ -93,7 +129,7 @@ func TestK8sResourceWithFakeClient(t *testing.T) {
 		corev1.SchemeGroupVersion.WithResource("nodes"),
 		"", "hello")
 	(<-xs).Dispatch(
-		func() { t.Fatalf("unexpected sync") },
+		func(_ Store[*corev1.Node]) { t.Fatalf("unexpected sync") },
 		func(key Key, node *corev1.Node) {
 			t.Fatalf("unexpected update of %s", key)
 		},
