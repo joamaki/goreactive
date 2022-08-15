@@ -13,3 +13,7 @@ type Tuple3[V1, V2, V3 any] struct {
 	V2 V2
 	V3 V3
 }
+
+type DeepEqual[T any] interface {
+	DeepEqual(other T) bool
+}

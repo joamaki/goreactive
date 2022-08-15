@@ -176,9 +176,9 @@ func Scan[In, Out any](src Observable[In], init Out, step func(Out, In) Out) Obs
 }
 
 // Zip2 takes two observables and merges them into an observable of pairs
-func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple2[V1,V2]] {
+func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple2[V1, V2]] {
 	return FuncObservable[Tuple2[V1, V2]](
-		func(ctx context.Context, next func(Tuple2[V1,V2]) error) error {
+		func(ctx context.Context, next func(Tuple2[V1, V2]) error) error {
 			subCtx, cancel := context.WithCancel(ctx)
 
 			errs := make(chan error, 2)
@@ -198,7 +198,7 @@ func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple
 					break
 				}
 
-				if err := next(Tuple2[V1,V2]{V1: v1, V2: v2}); err != nil {
+				if err := next(Tuple2[V1, V2]{V1: v1, V2: v2}); err != nil {
 					errOut = err
 					break
 				}
@@ -207,8 +207,10 @@ func Zip2[V1, V2 any](src1 Observable[V1], src2 Observable[V2]) Observable[Tuple
 			cancel()
 
 			// Drain
-			for range v1s {}
-			for range v2s {}
+			for range v1s {
+			}
+			for range v2s {
+			}
 
 			if err := <-errs; err != nil && errOut == nil {
 				errOut = err
@@ -267,7 +269,7 @@ var DefaultMulticastParams = MulticastParams{16, false}
 // Returns the wrapped observable and a function to connect observers to the
 // source observable. Connect will block until source observable completes and
 // returns the error if any from the source observable.
-// 
+//
 // Observers can subscribe both before and after the source has been connected,
 // but may miss events if subscribing after connect.
 func Multicast[T any](params MulticastParams, src Observable[T]) (mcast Observable[T], connect func(context.Context) error) {
@@ -372,6 +374,38 @@ func Multicast[T any](params MulticastParams, src Observable[T]) (mcast Observab
 	return
 }
 
+// Distinct skips adjacent duplicate comparable values from the stream.
+func Distinct[T comparable](src Observable[T]) Observable[T] {
+	var prev T
+	first := true
+	return Filter(src, func(item T) bool {
+		if first {
+			first = false
+			prev = item
+			return true
+		}
+		eq := prev == item
+		prev = item
+		return !eq
+	})
+}
+
+// DistinctByDeepEqual skips adjacent duplicate comparable values from the stream.
+func DistinctByDeepEqual[T DeepEqual[T]](src Observable[T]) Observable[T] {
+	var prev T
+	first := true
+	return Filter(src, func(item T) bool {
+		if first {
+			first = false
+			prev = item
+			return true
+		}
+		eq := prev.DeepEqual(item)
+		prev = item
+		return !eq
+	})
+}
+
 // CoalesceByKey buffers updates from the input observable and keeps only the latest version of the
 // value for the same key when the observer is slow in consuming the values.
 func CoalesceByKey[K comparable, V any](src Observable[V], toKey func(V) K, bufferSize int) Observable[V] {
@@ -410,7 +444,8 @@ type mergeNext[T any] struct {
 // Beware: the observables are observed from goroutines spawned by Merge()
 // and thus run concurrently, e.g. functions doFoo and doBar are called from
 // different goroutines than Observe():
-//   Merge(Map(foo, doFoo), Map(bar, doBar)).Observe(...)
+//
+//	Merge(Map(foo, doFoo), Map(bar, doBar)).Observe(...)
 func Merge[T any](srcs ...Observable[T]) Observable[T] {
 	return FuncObservable[T](
 		func(ctx context.Context, next func(T) error) error {
@@ -515,6 +550,7 @@ func Delay[T any](src Observable[T], duration time.Duration) Observable[T] {
 }
 
 type BackpressureStrategy string
+
 const (
 	// Items are dropped if buffer is full
 	BackpressureDrop = BackpressureStrategy("drop")
@@ -522,7 +558,6 @@ const (
 	// Observing blocks until there is room in the buffer
 	BackpressureBlock = BackpressureStrategy("block")
 )
-
 
 // Buffer buffers 'n' items with configurable backpressure strategy.
 // Downstream errors are not propagated towards 'src'.
@@ -656,7 +691,6 @@ func TakeWhile[T any](pred func(T) bool, src Observable[T]) Observable[T] {
 		})
 }
 
-
 // Skip skips the first 'n' items from the source.
 func Skip[T any](n int, src Observable[T]) Observable[T] {
 	return FuncObservable[T](
@@ -704,7 +738,7 @@ func SplitHead[T any](src Observable[T]) (head Observable[T], tail Observable[T]
 
 //
 // Retrying and error handling
-// 
+//
 
 // RetryFunc decides whether the processing should be retried for the given error
 type RetryFunc func(err error) bool

@@ -9,10 +9,9 @@ import (
 	"fmt"
 	"runtime"
 	"sort"
+	"sync/atomic"
 	"testing"
 	"time"
-	"sync/atomic"
-
 )
 
 func checkCancelled(t *testing.T, what string, src Observable[int]) {
@@ -57,7 +56,7 @@ func TestFilter(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	isOdd := func(x int) bool { return x%2!=0 }
+	isOdd := func(x int) bool { return x%2 != 0 }
 
 	// 1. filtering a non-empty source
 	{
@@ -65,7 +64,7 @@ func TestFilter(t *testing.T) {
 		src = Filter(src, isOdd)
 		result, err := ToSlice(ctx, src)
 		assertNil(t, "case 1", err)
-		assertSlice(t, "case 1", []int{1,3}, result)
+		assertSlice(t, "case 1", []int{1, 3}, result)
 	}
 
 	// 2. filtering an empty source
@@ -88,11 +87,11 @@ func TestReduce(t *testing.T) {
 
 	// 1. Reducing a non-empty source
 	{
-		src := Range(0,5)
+		src := Range(0, 5)
 		src = Reduce(src, 0, sum)
 		result, err := ToSlice(ctx, src)
 		assertNil(t, "case 1", err)
-		assertSlice(t, "case 1", []int{0+0+1+2+3+4}, result)
+		assertSlice(t, "case 1", []int{0 + 0 + 1 + 2 + 3 + 4}, result)
 	}
 
 	// 2. Reducing an empty source
@@ -108,55 +107,54 @@ func TestReduce(t *testing.T) {
 }
 
 func TestScan(t *testing.T) {
-	src := Scan(Range(1,4), 1, func(x, y int) int {
-		         return x * y
+	src := Scan(Range(1, 4), 1, func(x, y int) int {
+		return x * y
 	})
 	xs, err := ToSlice(context.TODO(), src)
 	assertNil(t, "Scan", err)
 	assertSlice(t, "scan",
-	            []int{1*1, 1*1*2, 1*1*2*3},
-	            xs)
+		[]int{1 * 1, 1 * 1 * 2, 1 * 1 * 2 * 3},
+		xs)
 }
 
 func TestZip2(t *testing.T) {
 	// 1. Non-empty sources
-	src := Zip2(Range(0,5), Range(5, 10))
+	src := Zip2(Range(0, 5), Range(5, 10))
 	xs, err := ToSlice(context.TODO(), src)
 	assertNil(t, "case 1", err)
 	assertSlice(t, "case 1",
-	            []Tuple2[int,int]{
-			{0,5},
-			{1,6},
-			{2,7},
-			{3,8},
-			{4,9},
-	            },
-		    xs)
+		[]Tuple2[int, int]{
+			{0, 5},
+			{1, 6},
+			{2, 7},
+			{3, 8},
+			{4, 9},
+		},
+		xs)
 
-        // 2. One shorter than the other
-	src = Zip2(Range(0,5), Just(5))
+	// 2. One shorter than the other
+	src = Zip2(Range(0, 5), Just(5))
 	xs, err = ToSlice(context.TODO(), src)
 	assertNil(t, "case 2", err)
 	assertSlice(t, "case 2",
-	            []Tuple2[int,int]{
-			{0,5},
-	            },
-		    xs)
+		[]Tuple2[int, int]{
+			{0, 5},
+		},
+		xs)
 
 	// 3. One empty
-	src = Zip2(Range(0,5), Empty[int]())
+	src = Zip2(Range(0, 5), Empty[int]())
 	xs, err = ToSlice(context.TODO(), src)
 	assertNil(t, "case 3", err)
 	assertSlice(t, "case 3",
-	            []Tuple2[int,int]{},
-		    xs)
+		[]Tuple2[int, int]{},
+		xs)
 
 	// 4. Cancelled context
 	checkCancelled(t, "case 4",
-		Map(Zip2(Range(0,5), Stuck[int]()), func(t Tuple2[int,int]) int { return t.V1 }),
+		Map(Zip2(Range(0, 5), Stuck[int]()), func(t Tuple2[int, int]) int { return t.V1 }),
 	)
 }
-
 
 func TestFlatMap(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -188,10 +186,10 @@ func TestFlatMap(t *testing.T) {
 }
 
 func TestFlatten(t *testing.T) {
-	src := FromSlice([][]int{{1,2}, {3,4}})
+	src := FromSlice([][]int{{1, 2}, {3, 4}})
 	result, err := ToSlice(context.TODO(), Flatten(src))
 	assertNil(t, "ToSlice(Flatten)", err)
-	assertSlice(t, "ToSlice(Flatten)", []int{1,2,3,4}, result)
+	assertSlice(t, "ToSlice(Flatten)", []int{1, 2, 3, 4}, result)
 }
 
 func TestParallelMap(t *testing.T) {
@@ -223,7 +221,7 @@ func TestParallelMap(t *testing.T) {
 	// 3. downstream error
 	{
 		var nope = errors.New("nope")
-		src := ParallelMap(Range(1,100), 2, double)
+		src := ParallelMap(Range(1, 100), 2, double)
 		err := src.Observe(
 			ctx,
 			func(item int) error {
@@ -250,7 +248,7 @@ func TestConcat(t *testing.T) {
 	assertSlice(t, "case 1", res1, []int{1, 2, 3})
 
 	// 2. test cancelled concat
-	checkCancelled(t, "case 2",Concat(Just(1), Stuck[int]()))
+	checkCancelled(t, "case 2", Concat(Just(1), Stuck[int]()))
 
 	// 3. test empty concat
 	res3, err := ToSlice(ctx, Concat[int]())
@@ -364,7 +362,7 @@ func TestMulticastCancel(t *testing.T) {
 	defer close(connErrs)
 	go func() { connErrs <- connect(ctx) }()
 
-	time.Sleep(10*time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 	cancel()
 
 	// Process errors from the subscribers
@@ -385,7 +383,7 @@ func TestMulticastEmitLatest(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	expected := []int{0,1,2,3,4}
+	expected := []int{0, 1, 2, 3, 4}
 	lastItem := expected[len(expected)-1]
 
 	src, connect := Multicast(MulticastParams{16, true}, Concat(FromSlice(expected), Stuck[int]()))
@@ -393,10 +391,10 @@ func TestMulticastEmitLatest(t *testing.T) {
 
 	// Subscribe first to wait for all items to be emitted
 	src.Observe(ctx, func(item int) error {
-		    if item == lastItem {
-			    return errors.New("stop")
-		    }
-		    return nil
+		if item == lastItem {
+			return errors.New("stop")
+		}
+		return nil
 	})
 
 	// Then subscribe again to check that the latest item is seen.
@@ -453,7 +451,7 @@ func TestCoalesceByKey(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	values := []int{1,2,3,2,3,4}
+	values := []int{1, 2, 3, 2, 3, 4}
 
 	toKey := func(v int) int {
 		return v
@@ -547,12 +545,12 @@ func TestThrottle(t *testing.T) {
 	}()
 
 	ratePerSecond := 2000.0
-	values, err := ToSlice(ctx, Throttle(Range(0,100000), ratePerSecond, 1))
+	values, err := ToSlice(ctx, Throttle(Range(0, 100000), ratePerSecond, 1))
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected Canceled error, got %s", err)
 	}
 
-	expectedLen := int(float64(waitMillis)/1000.0 * ratePerSecond )
+	expectedLen := int(float64(waitMillis) / 1000.0 * ratePerSecond)
 
 	lenDiff := len(values) - expectedLen
 	if lenDiff < 0 {
@@ -566,7 +564,7 @@ func TestThrottle(t *testing.T) {
 
 func TestDelay(t *testing.T) {
 	t0 := time.Now()
-	delay := 10*time.Millisecond
+	delay := 10 * time.Millisecond
 	_, err := First(context.TODO(), Delay(Just(1), delay))
 	t1 := time.Now()
 	assertNil(t, "Delay", err)
@@ -602,7 +600,7 @@ func TestTakeSkip(t *testing.T) {
 
 	taken3, err := ToSlice(ctx, Take(5, Concat(Range(0, 5), Stuck[int]())))
 	assertNil(t, "ToSlice", err)
-	assertSlice(t, "take 5 of 5", []int{0,1,2,3,4}, taken3)
+	assertSlice(t, "take 5 of 5", []int{0, 1, 2, 3, 4}, taken3)
 }
 
 func TestTakeWhile(t *testing.T) {
@@ -613,7 +611,7 @@ func TestTakeWhile(t *testing.T) {
 
 	xs, err := ToSlice(ctx, TakeWhile(pred, Range(0, 100)))
 	assertNil(t, "ToSlice+TakeWhile+Range", err)
-	assertSlice(t, "TakeWhile < 5", []int{0,1,2,3,4}, xs)
+	assertSlice(t, "TakeWhile < 5", []int{0, 1, 2, 3, 4}, xs)
 
 	xs, err = ToSlice(ctx, TakeWhile(pred, Empty[int]()))
 	assertNil(t, "ToSlice+TakeWhile+Empty", err)
@@ -736,7 +734,7 @@ func TestRetryFuncs(t *testing.T) {
 		}
 	}
 	tdiff := time.Now().Sub(t0)
-	expectedDiff := time.Duration(1 + 2 + 4 + 8 + 10 + 10) * time.Millisecond
+	expectedDiff := time.Duration(1+2+4+8+10+10) * time.Millisecond
 
 	if tdiff < expectedDiff || tdiff > 2*expectedDiff {
 		t.Fatalf("expected backoff duration to be ~%s, it was %s", expectedDiff, tdiff)
@@ -745,7 +743,7 @@ func TestRetryFuncs(t *testing.T) {
 
 func TestOnNext(t *testing.T) {
 	sum := 0
-	src := OnNext(Range(0,5), func(item int) {
+	src := OnNext(Range(0, 5), func(item int) {
 		sum += item
 	})
 	_, err := ToSlice(context.TODO(), src)
@@ -753,6 +751,28 @@ func TestOnNext(t *testing.T) {
 	if sum != 0+1+2+3+4 {
 		t.Fatal("unexpected sum")
 	}
+}
+
+func TestDistict(t *testing.T) {
+	items := FromSlice([]int{1, 2, 3, 3, 2, 1})
+	result, err := ToSlice(context.TODO(), Distinct(items))
+	assertNil(t, "ToSlice+Distict", err)
+	assertSlice(t, "Distinct", []int{1, 2, 3, 2, 1}, result)
+}
+
+type value struct {
+	X int
+}
+
+func (v value) DeepEqual(other value) bool {
+	return v.X == other.X
+}
+
+func TestDistictByDeepEqual(t *testing.T) {
+	items := FromSlice([]value{{1}, {2}, {3}, {3}, {2}, {1}})
+	result, err := ToSlice(context.TODO(), DistinctByDeepEqual(items))
+	assertNil(t, "ToSlice+DistictByDeepEqual", err)
+	assertSlice(t, "DistinctByDeepEqual", []value{{1}, {2}, {3}, {2}, {1}}, result)
 }
 
 //
@@ -796,7 +816,6 @@ func BenchmarkBroadcast(b *testing.B) {
 			count++
 			return nil
 		})
-
 
 	if err != nil {
 		b.Fatal(err)
